@@ -1,0 +1,16 @@
+[project]
+name = "procuforge"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "google-adk>=1.31.1",
+    "python-dotenv>=1.2.2",
+]
+
+[tool.agents-cli]
+name = "procuforge"
+description = "Caveman grunt agent — compress verbose text to terse technical grunts"
+base_template = "adk"
+agent_directory = "master"
