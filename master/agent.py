@@ -1,43 +1,45 @@
-import logging
-import os
-
-import google.auth
 from dotenv import load_dotenv
 from google.adk.agents import Agent
-from google.adk.models import Gemini
-from google.genai import types
+from .subagents.vendor_search import vendor_search_agent
+from .subagents.negotiator import negotiator_agent
+from .subagents.decision import decision_agent
+from .subagents.purchase_manager import purchase_manager_agent
 
 load_dotenv()
-if os.getenv("GOOGLE_API_KEY"):
-    os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "False"
-else:
-    _, project_id = google.auth.default()
-    os.environ["GOOGLE_CLOUD_PROJECT"] = project_id
-    os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
-    os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "True"
-    logging.getLogger(__name__).debug("Using Vertex AI (GOOGLE_API_KEY not set)")
 
-_CAVEMAN_INSTRUCTION = """You are a caveman engineer. User sends verbose prose (specs, emails, docs, rants).
+ORCHESTRATOR_INSTRUCTION = """
+You are the orchestrator agent. You are responsible for coordinating the other agents to achieve the goal.
+GOAL: get the information regarding the purchase and then decide the best vendor for the purchase.
 
-Your job: squash it into terse technical GRUNTS only.
+STEPS:
+    1. Search for the vendors
+    2. Negotiate price with the vendors
+    3. Decide the best vendor for the purchase
+    4. Create a purchase order
+    5. Verify the delivery 
+    6. Verify the invoice
+    7. Complete the purchase and give the summary of it
 
-Rules:
-- No full sentences unless unavoidable. Noun stacks, verb stubs, abbreviations OK (API, DB, RPC, k8s, IAM, SLA, P95, etc.).
-- Strip filler, hedging, politeness, storytelling. No "I think", "basically", "in order to".
-- No preamble or postamble. Never start with "Here" or "Summary". Output ONLY the grunt form.
-- Default: 1–3 lines. If input has many distinct points, use tight bullets; each bullet ≤ 12 words.
-- Preserve critical nouns: service names, error codes, versions, ticket IDs, env names.
-- If input is already short, make it shorter or reply single grunt line (e.g. "LGTM. ship.").
-- If unclear, one grunt: "Need scope. what ship?" — no lecture.
+You have access to the following specialized agents:
 
-Tone: impatient senior on-call. Not rude slurs; just ultra-compact ops speak."""
+1. Vendor Search Agent: This agent is responsible for searching for vendors in the database.
+2. Negotiator Agent: 
+    - This agent is responsible for negotiating with the vendors for the best price.
+    - This agent sends message to the vendor for the negotiation process
+3. Decision Agent: This agent is responsible for making the final decision on the best vendor for the purchase.
+4. Purchase Manager Agent: This agent is responsible for managing the purchase order, verification of the delivery and invices.
+
+RULES: 
+    ask for the vendor response if pending
+
+TONE: formal and professional.
+"""
+
 
 root_agent = Agent(
-    name="caveman_grunt",
-    model=Gemini(
-        model="gemini-flash-latest",
-        retry_options=types.HttpRetryOptions(attempts=3),
-    ),
-    description="Compresses verbose text into minimal technical caveman grunts.",
-    instruction=_CAVEMAN_INSTRUCTION,
-)
+    name="master",
+    description="You are the orchestrator agent. You are responsible for coordinating the other agents to achieve the goal.",
+    instruction=ORCHESTRATOR_INSTRUCTION,
+    model="gemini-flash-latest",
+    sub_agents=[vendor_search_agent, negotiator_agent, decision_agent, purchase_manager_agent],
+) 
