@@ -1635,6 +1635,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "google-adk" },
+    { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "vertexai" },
 ]
@@ -1642,6 +1643,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "google-adk", specifier = ">=1.31.1" },
+    { name = "pydantic", specifier = ">=2.13.3" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "vertexai", specifier = ">=1.43.0" },
 ]
