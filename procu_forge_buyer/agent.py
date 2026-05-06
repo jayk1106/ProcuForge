@@ -37,7 +37,7 @@ TONE: formal and professional.
 
 
 root_agent = Agent(
-    name="master",
+    name="procu_forge_buyer",
     description="You are the orchestrator agent. You are responsible for coordinating the other agents to achieve the goal.",
     instruction=ORCHESTRATOR_INSTRUCTION,
     model="gemini-flash-latest",
