@@ -11,7 +11,7 @@ from db.collections.common import (
     Specifications,
 )
 from db.collections.organisation import COLLECTION_ID as ORGANISATION_COLLECTION_ID
-from db.collections.organisation import Organisation, OrganisationSettings
+from db.collections.organisation import Organisation
 from db.collections.product import COLLECTION_ID as PRODUCT_COLLECTION_ID
 from db.collections.product import Product
 from db.collections.requisition import COLLECTION_ID as REQUISITION_COLLECTION_ID
@@ -66,7 +66,6 @@ __all__ = [
     "NegotiationMessage",
     "NegotiationStep",
     "Organisation",
-    "OrganisationSettings",
     "Product",
     "PurchaseOrderBlock",
     "Requisition",

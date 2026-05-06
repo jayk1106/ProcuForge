@@ -1,0 +1,242 @@
+[
+  {
+    "id": "8ba9dcc8-6a12-4c68-8811-b60840d72abd",
+    "name": "SupplyWave",
+    "categories": [
+      "66cd4b1d-5c9b-4784-a2b3-e8f3bd1e40d0",
+      "785a9afb-b367-4668-82d1-d9c932112d0c"
+    ],
+    "contact": {
+      "email": "sales+vendor01@example.com",
+      "phone": "+1-555-0101",
+      "website": "https://example.com"
+    },
+    "address": {
+      "country": "USA",
+      "state": "New York",
+      "city": "New York"
+    },
+    "paymentTerms": "Net 30",
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "e8f6f7bf-8197-4cf2-a389-2580b6994eaa",
+    "name": "ProcureNest",
+    "categories": [
+      "785a9afb-b367-4668-82d1-d9c932112d0c",
+      "693a25b2-6b62-4b4d-9cc1-1e0d70479521"
+    ],
+    "contact": {
+      "email": "sales+vendor02@example.com",
+      "phone": "+1-555-0102",
+      "website": "https://example.com"
+    },
+    "address": {
+      "country": "USA",
+      "state": "Texas",
+      "city": "Austin"
+    },
+    "paymentTerms": "Net 30",
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "de1f11a1-a2e9-4da1-85db-8d04e8baebb0",
+    "name": "CivicSource",
+    "categories": [
+      "693a25b2-6b62-4b4d-9cc1-1e0d70479521",
+      "7053df7d-a396-421a-97bb-8de357b23070"
+    ],
+    "contact": {
+      "email": "sales+vendor03@example.com",
+      "phone": "+1-555-0103",
+      "website": "https://example.com"
+    },
+    "address": {
+      "country": "USA",
+      "state": "New York",
+      "city": "New York"
+    },
+    "paymentTerms": "Net 30",
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "5fbebce3-8715-4150-8f14-3def51d54208",
+    "name": "PioneerTrade",
+    "categories": [
+      "7053df7d-a396-421a-97bb-8de357b23070",
+      "1d4e6930-6704-4d10-9b1f-a1b593162b5a"
+    ],
+    "contact": {
+      "email": "sales+vendor04@example.com",
+      "phone": "+1-555-0104",
+      "website": "https://example.com"
+    },
+    "address": {
+      "country": "USA",
+      "state": "Texas",
+      "city": "Austin"
+    },
+    "paymentTerms": "Net 30",
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "d39c51a0-7834-4758-9e11-234f033c47c8",
+    "name": "BrightCart",
+    "categories": [
+      "1d4e6930-6704-4d10-9b1f-a1b593162b5a",
+      "66cd4b1d-5c9b-4784-a2b3-e8f3bd1e40d0"
+    ],
+    "contact": {
+      "email": "sales+vendor05@example.com",
+      "phone": "+1-555-0105",
+      "website": "https://example.com"
+    },
+    "address": {
+      "country": "USA",
+      "state": "New York",
+      "city": "New York"
+    },
+    "paymentTerms": "Net 30",
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "8065175f-c9f3-4e2e-b2c1-1091178538fb",
+    "name": "AtlasDepot",
+    "categories": [
+      "66cd4b1d-5c9b-4784-a2b3-e8f3bd1e40d0",
+      "785a9afb-b367-4668-82d1-d9c932112d0c"
+    ],
+    "contact": {
+      "email": "sales+vendor06@example.com",
+      "phone": "+1-555-0106",
+      "website": "https://example.com"
+    },
+    "address": {
+      "country": "USA",
+      "state": "Texas",
+      "city": "Austin"
+    },
+    "paymentTerms": "Net 30",
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "fab8f4ca-40d2-4e8a-9aac-978e92a94ee9",
+    "name": "BlueLeaf Goods",
+    "categories": [
+      "785a9afb-b367-4668-82d1-d9c932112d0c",
+      "693a25b2-6b62-4b4d-9cc1-1e0d70479521"
+    ],
+    "contact": {
+      "email": "sales+vendor07@example.com",
+      "phone": "+1-555-0107",
+      "website": "https://example.com"
+    },
+    "address": {
+      "country": "USA",
+      "state": "New York",
+      "city": "New York"
+    },
+    "paymentTerms": "Net 30",
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "264ed721-79e9-42d8-b663-c46262795d2d",
+    "name": "Riverstone Supply",
+    "categories": [
+      "693a25b2-6b62-4b4d-9cc1-1e0d70479521",
+      "7053df7d-a396-421a-97bb-8de357b23070"
+    ],
+    "contact": {
+      "email": "sales+vendor08@example.com",
+      "phone": "+1-555-0108",
+      "website": "https://example.com"
+    },
+    "address": {
+      "country": "USA",
+      "state": "Texas",
+      "city": "Austin"
+    },
+    "paymentTerms": "Net 30",
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "0133a82a-603c-4684-995d-519edd7aa314",
+    "name": "SilverOak Wholesale",
+    "categories": [
+      "7053df7d-a396-421a-97bb-8de357b23070",
+      "1d4e6930-6704-4d10-9b1f-a1b593162b5a"
+    ],
+    "contact": {
+      "email": "sales+vendor09@example.com",
+      "phone": "+1-555-0109",
+      "website": "https://example.com"
+    },
+    "address": {
+      "country": "USA",
+      "state": "New York",
+      "city": "New York"
+    },
+    "paymentTerms": "Net 30",
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "71c56364-f0de-423a-8557-2e4d2c51277d",
+    "name": "CedarPoint Trading",
+    "categories": [
+      "1d4e6930-6704-4d10-9b1f-a1b593162b5a",
+      "66cd4b1d-5c9b-4784-a2b3-e8f3bd1e40d0"
+    ],
+    "contact": {
+      "email": "sales+vendor10@example.com",
+      "phone": "+1-555-0110",
+      "website": "https://example.com"
+    },
+    "address": {
+      "country": "USA",
+      "state": "Texas",
+      "city": "Austin"
+    },
+    "paymentTerms": "Net 30",
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  }
+]

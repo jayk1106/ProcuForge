@@ -9,6 +9,5 @@ class Category(FirestoreBaseModel):
     id: str
     name: str
     description: str
-    icon: str
     active: bool
     metadata: DocumentMetadata

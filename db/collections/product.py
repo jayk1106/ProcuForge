@@ -20,8 +20,6 @@ class Product(FirestoreBaseModel):
     type: str
     description: str
     specifications: Specifications
-    unit_of_measure: str = Field(alias="unitOfMeasure")
     estimated_price_range: EstimatedPriceRange = Field(alias="estimatedPriceRange")
-    aliases: list[str]
     active: bool
     metadata: DocumentMetadata

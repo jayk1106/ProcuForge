@@ -1,0 +1,454 @@
+[
+  {
+    "id": "952845d3-4e38-4d7e-a116-7b152d603ce9",
+    "categoryId": "66cd4b1d-5c9b-4784-a2b3-e8f3bd1e40d0",
+    "name": "Aster Notebook A5",
+    "brand": "PaperCo",
+    "type": "physical",
+    "description": "Dev seed item: Aster Notebook A5",
+    "specifications": {
+      "tier": "standard",
+      "warrantyMonths": 12
+    },
+    "estimatedPriceRange": {
+      "currency": "USD",
+      "min": 26.0,
+      "max": 63.0
+    },
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "3308925d-f02c-40d0-9bd9-fb964836742a",
+    "categoryId": "66cd4b1d-5c9b-4784-a2b3-e8f3bd1e40d0",
+    "name": "Clip Set Medium",
+    "brand": "PaperCo",
+    "type": "physical",
+    "description": "Dev seed item: Clip Set Medium",
+    "specifications": {
+      "tier": "standard",
+      "warrantyMonths": 12
+    },
+    "estimatedPriceRange": {
+      "currency": "USD",
+      "min": 27.0,
+      "max": 66.0
+    },
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "4677d1fd-c12a-49a2-8292-3dd367e42315",
+    "categoryId": "66cd4b1d-5c9b-4784-a2b3-e8f3bd1e40d0",
+    "name": "Gel Pen Pack",
+    "brand": "InkWorks",
+    "type": "physical",
+    "description": "Dev seed item: Gel Pen Pack",
+    "specifications": {
+      "tier": "standard",
+      "warrantyMonths": 12
+    },
+    "estimatedPriceRange": {
+      "currency": "USD",
+      "min": 28.0,
+      "max": 69.0
+    },
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "87d67126-16ba-4c8e-be1f-8a8d7b80f2fe",
+    "categoryId": "66cd4b1d-5c9b-4784-a2b3-e8f3bd1e40d0",
+    "name": "Desktop Organizer",
+    "brand": "DeskMate",
+    "type": "physical",
+    "description": "Dev seed item: Desktop Organizer",
+    "specifications": {
+      "tier": "standard",
+      "warrantyMonths": 12
+    },
+    "estimatedPriceRange": {
+      "currency": "USD",
+      "min": 29.0,
+      "max": 72.0
+    },
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "63365a14-ab2b-4dc3-9d38-5bd98757fcf6",
+    "categoryId": "785a9afb-b367-4668-82d1-d9c932112d0c",
+    "name": "Nova Laptop 13",
+    "brand": "NovaCompute",
+    "type": "physical",
+    "description": "Dev seed item: Nova Laptop 13",
+    "specifications": {
+      "tier": "standard",
+      "warrantyMonths": 12,
+      "interface": "hdmi"
+    },
+    "estimatedPriceRange": {
+      "currency": "USD",
+      "min": 30.0,
+      "max": 75.0
+    },
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "b98cc891-9088-47c1-ab77-eff4821572c9",
+    "categoryId": "785a9afb-b367-4668-82d1-d9c932112d0c",
+    "name": "Orion Monitor 24",
+    "brand": "ViewPoint",
+    "type": "physical",
+    "description": "Dev seed item: Orion Monitor 24",
+    "specifications": {
+      "tier": "standard",
+      "warrantyMonths": 12,
+      "interface": "hdmi"
+    },
+    "estimatedPriceRange": {
+      "currency": "USD",
+      "min": 31.0,
+      "max": 78.0
+    },
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "6be82840-b54c-43b2-9efb-701647ae81b9",
+    "categoryId": "785a9afb-b367-4668-82d1-d9c932112d0c",
+    "name": "USB-C Dock",
+    "brand": "LinkGear",
+    "type": "physical",
+    "description": "Dev seed item: USB-C Dock",
+    "specifications": {
+      "tier": "standard",
+      "warrantyMonths": 12,
+      "interface": "usb-c"
+    },
+    "estimatedPriceRange": {
+      "currency": "USD",
+      "min": 32.0,
+      "max": 81.0
+    },
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "ff5f4399-5455-4451-a70d-f82c5bcedab5",
+    "categoryId": "785a9afb-b367-4668-82d1-d9c932112d0c",
+    "name": "Wi-Fi Router AX",
+    "brand": "NetCore",
+    "type": "physical",
+    "description": "Dev seed item: Wi-Fi Router AX",
+    "specifications": {
+      "tier": "standard",
+      "warrantyMonths": 12,
+      "interface": "hdmi"
+    },
+    "estimatedPriceRange": {
+      "currency": "USD",
+      "min": 33.0,
+      "max": 84.0
+    },
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "275ef4f2-1aee-4e94-8737-13838ba98005",
+    "categoryId": "693a25b2-6b62-4b4d-9cc1-1e0d70479521",
+    "name": "Neutral Cleaner 5L",
+    "brand": "CleanLine",
+    "type": "physical",
+    "description": "Dev seed item: Neutral Cleaner 5L",
+    "specifications": {
+      "tier": "standard",
+      "warrantyMonths": 12
+    },
+    "estimatedPriceRange": {
+      "currency": "USD",
+      "min": 34.0,
+      "max": 87.0
+    },
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "ec9a81a9-ffe1-45df-9a87-fab0be8420b5",
+    "categoryId": "693a25b2-6b62-4b4d-9cc1-1e0d70479521",
+    "name": "Microfiber Cloth Pack",
+    "brand": "CleanLine",
+    "type": "physical",
+    "description": "Dev seed item: Microfiber Cloth Pack",
+    "specifications": {
+      "tier": "standard",
+      "warrantyMonths": 12
+    },
+    "estimatedPriceRange": {
+      "currency": "USD",
+      "min": 35.0,
+      "max": 90.0
+    },
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "cbbc9699-eebc-4bb1-bb2d-8d2934fec2e7",
+    "categoryId": "693a25b2-6b62-4b4d-9cc1-1e0d70479521",
+    "name": "LED Bulb 12W",
+    "brand": "BrightLite",
+    "type": "physical",
+    "description": "Dev seed item: LED Bulb 12W",
+    "specifications": {
+      "tier": "standard",
+      "warrantyMonths": 12
+    },
+    "estimatedPriceRange": {
+      "currency": "USD",
+      "min": 36.0,
+      "max": 93.0
+    },
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "96543684-ff12-4bff-89d7-1a23e449b769",
+    "categoryId": "693a25b2-6b62-4b4d-9cc1-1e0d70479521",
+    "name": "Tool Kit Basic",
+    "brand": "FixAll",
+    "type": "physical",
+    "description": "Dev seed item: Tool Kit Basic",
+    "specifications": {
+      "tier": "standard",
+      "warrantyMonths": 12
+    },
+    "estimatedPriceRange": {
+      "currency": "USD",
+      "min": 37.0,
+      "max": 96.0
+    },
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "37841ef2-295e-4e2a-a30e-7dc9860001d1",
+    "categoryId": "7053df7d-a396-421a-97bb-8de357b23070",
+    "name": "Safety Gloves Nitrile",
+    "brand": "SafeWear",
+    "type": "physical",
+    "description": "Dev seed item: Safety Gloves Nitrile",
+    "specifications": {
+      "tier": "standard",
+      "warrantyMonths": 12
+    },
+    "estimatedPriceRange": {
+      "currency": "USD",
+      "min": 38.0,
+      "max": 99.0
+    },
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "c3525642-9521-477d-ad70-6d1da44a1ea6",
+    "categoryId": "7053df7d-a396-421a-97bb-8de357b23070",
+    "name": "Ear Protection",
+    "brand": "SafeWear",
+    "type": "physical",
+    "description": "Dev seed item: Ear Protection",
+    "specifications": {
+      "tier": "standard",
+      "warrantyMonths": 12
+    },
+    "estimatedPriceRange": {
+      "currency": "USD",
+      "min": 39.0,
+      "max": 102.0
+    },
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "5baecc94-f1cc-42ed-a3b7-20da41926f0f",
+    "categoryId": "7053df7d-a396-421a-97bb-8de357b23070",
+    "name": "Safety Goggles",
+    "brand": "VisionGuard",
+    "type": "physical",
+    "description": "Dev seed item: Safety Goggles",
+    "specifications": {
+      "tier": "standard",
+      "warrantyMonths": 12
+    },
+    "estimatedPriceRange": {
+      "currency": "USD",
+      "min": 40.0,
+      "max": 105.0
+    },
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "53fb5e30-a7a4-4249-8cb7-07d4d6e7be60",
+    "categoryId": "7053df7d-a396-421a-97bb-8de357b23070",
+    "name": "First Aid Kit",
+    "brand": "CarePack",
+    "type": "physical",
+    "description": "Dev seed item: First Aid Kit",
+    "specifications": {
+      "tier": "standard",
+      "warrantyMonths": 12
+    },
+    "estimatedPriceRange": {
+      "currency": "USD",
+      "min": 41.0,
+      "max": 108.0
+    },
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "44e52969-f33b-4e99-99d8-fe33a83a0d5a",
+    "categoryId": "1d4e6930-6704-4d10-9b1f-a1b593162b5a",
+    "name": "IT Onboarding Support",
+    "brand": "ServiceLab",
+    "type": "service",
+    "description": "Dev seed item: IT Onboarding Support",
+    "specifications": {
+      "tier": "standard",
+      "warrantyMonths": 12,
+      "delivery": "remote",
+      "unit": "hours"
+    },
+    "estimatedPriceRange": {
+      "currency": "USD",
+      "min": 42.0,
+      "max": 111.0
+    },
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "2637efcc-e4d1-4c0e-ba39-8cb00a0657f7",
+    "categoryId": "1d4e6930-6704-4d10-9b1f-a1b593162b5a",
+    "name": "Security Review",
+    "brand": "ServiceLab",
+    "type": "service",
+    "description": "Dev seed item: Security Review",
+    "specifications": {
+      "tier": "standard",
+      "warrantyMonths": 12,
+      "delivery": "remote",
+      "unit": "hours"
+    },
+    "estimatedPriceRange": {
+      "currency": "USD",
+      "min": 43.0,
+      "max": 114.0
+    },
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "9f7c8c75-00a3-44be-836f-93d78c187c43",
+    "categoryId": "1d4e6930-6704-4d10-9b1f-a1b593162b5a",
+    "name": "Design Workshop",
+    "brand": "StudioOps",
+    "type": "service",
+    "description": "Dev seed item: Design Workshop",
+    "specifications": {
+      "tier": "standard",
+      "warrantyMonths": 12,
+      "delivery": "remote",
+      "unit": "hours"
+    },
+    "estimatedPriceRange": {
+      "currency": "USD",
+      "min": 44.0,
+      "max": 117.0
+    },
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "bd89587a-b501-48bc-a804-44a2c55b5a8b",
+    "categoryId": "1d4e6930-6704-4d10-9b1f-a1b593162b5a",
+    "name": "Process Mapping",
+    "brand": "StudioOps",
+    "type": "service",
+    "description": "Dev seed item: Process Mapping",
+    "specifications": {
+      "tier": "standard",
+      "warrantyMonths": 12,
+      "delivery": "remote",
+      "unit": "hours"
+    },
+    "estimatedPriceRange": {
+      "currency": "USD",
+      "min": 45.0,
+      "max": 120.0
+    },
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  }
+]
