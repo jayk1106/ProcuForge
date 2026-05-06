@@ -20,6 +20,7 @@ import json
 import os
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,7 @@ if "--grpc-dns-native" in sys.argv and not os.environ.get("GRPC_DNS_RESOLVER"):
 from dotenv import load_dotenv
 from google.api_core import retry as google_retry
 from google.api_core.exceptions import Conflict
+from google.cloud.firestore import SERVER_TIMESTAMP
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -71,6 +73,51 @@ def _fail_fast_retry(deadline_sec: float) -> google_retry.Retry:
         multiplier=1.7,
     )
 
+def _parse_iso_datetime(value: str) -> datetime | None:
+    # Accept `...Z` and `...+00:00` styles
+    raw = value.strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+def _coerce_firestore_timestamps(body: Any) -> Any:
+    """
+    Convert ISO-8601 strings in *At fields to datetime so Firestore stores Timestamps.
+    Also converts metadata.createdAt/updatedAt to SERVER_TIMESTAMP so seed imports
+    don't store them as strings.
+    """
+    if isinstance(body, list):
+        return [_coerce_firestore_timestamps(x) for x in body]
+    if not isinstance(body, dict):
+        return body
+
+    out: dict[str, Any] = {}
+    for k, v in body.items():
+        if k == "metadata" and isinstance(v, dict):
+            meta = dict(v)
+            # Prefer server timestamps for seed imports
+            if "createdAt" in meta:
+                meta["createdAt"] = SERVER_TIMESTAMP
+            if "updatedAt" in meta:
+                meta["updatedAt"] = SERVER_TIMESTAMP
+            out[k] = meta
+            continue
+
+        if isinstance(v, str) and k.endswith("At"):
+            dt = _parse_iso_datetime(v)
+            out[k] = dt if dt is not None else v
+            continue
+
+        out[k] = _coerce_firestore_timestamps(v)
+
+    return out
+
 
 def _import_collection(
     *,
@@ -94,6 +141,7 @@ def _import_collection(
 
         body = dict(doc)
         body.pop("id", None)  # doc id is stored as document name
+        body = _coerce_firestore_timestamps(body)
 
         try:
             if upsert:
