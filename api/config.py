@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -47,6 +47,34 @@ class APISettings(BaseSettings):
     api_v1_prefix: str = Field(
         default="/api/v1",
         validation_alias="API_V1_PREFIX",
+    )
+
+    vertex_project_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "VERTEX_PROJECT_ID",
+            "GOOGLE_PROJECT_ID",
+            "GOOGLE_CLOUD_PROJECT",
+        ),
+        description="Google Cloud project hosting the Vertex AI reasoning engine.",
+    )
+    vertex_location: str = Field(
+        default="us-central1",
+        validation_alias=AliasChoices("VERTEX_LOCATION", "GOOGLE_BUCKET_REGION"),
+        description="Vertex AI region (e.g. 'us-central1').",
+    )
+    reasoning_engine_app_name: str | None = Field(
+        default=None,
+        validation_alias="REASONING_ENGINE_APP_NAME",
+        description=(
+            "Fully-qualified Vertex AI reasoning engine resource name "
+            "(projects/{project}/locations/{location}/reasoningEngines/{id})."
+        ),
+    )
+    workflow_default_user_id: str = Field(
+        default="api-user",
+        validation_alias="WORKFLOW_DEFAULT_USER_ID",
+        description="Fallback ADK session user id until auth is wired.",
     )
 
     @field_validator("cors_origins", mode="before")

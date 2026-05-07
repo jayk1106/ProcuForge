@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.config import APISettings, get_api_settings
-from api.routers import health, test
+from api.routers import health, test, workflow
 
 load_dotenv()
 
@@ -46,6 +46,7 @@ def create_app(settings: APISettings | None = None) -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(test.router, prefix=settings.api_v1_prefix)
+    app.include_router(workflow.router, prefix=settings.api_v1_prefix)
 
     return app
 
