@@ -15,6 +15,14 @@ from db.firestore.repositories.products import ProductRepository
 logger = logging.getLogger(__name__)
 
 
+def _truncate_prompt_preview(text: str, *, max_len: int = 400) -> str:
+    """Shorten prompt text for debug logs (single line, ellipsis if needed)."""
+    one_line = " ".join(text.split())
+    if len(one_line) <= max_len:
+        return one_line
+    return one_line[: max_len - 3] + "..."
+
+
 @dataclass(slots=True)
 class AgentJob:
     """Payload handed to the background runner after the response is sent."""
@@ -66,6 +74,18 @@ class WorkflowService:
 
             from procu_forge_buyer.agent import root_agent
 
+            logger.info(
+                "workflow.run.start workflow_id=%s user_id=%s prompt_chars=%s",
+                job.workflow_id,
+                job.user_id,
+                len(job.prompt),
+            )
+            logger.debug(
+                "workflow.run.prompt_preview workflow_id=%s %s",
+                job.workflow_id,
+                _truncate_prompt_preview(job.prompt, max_len=400),
+            )
+
             session_service = VertexAiSessionService(
                 project=self._settings.vertex_project_id,
                 location=self._settings.vertex_location,
@@ -75,28 +95,41 @@ class WorkflowService:
                 app_name=self._settings.reasoning_engine_app_name,
                 session_service=session_service,
             )
-            logger.info("prompt", extra={"prompt": job.prompt})
-            print("prompt", job.prompt)
             message = genai_types.Content(
                 role="user",
                 parts=[genai_types.Part(text=job.prompt)],
             )
 
-            logger.info("workflow.run.start")
+            print(job.prompt)
+
             for event in runner.run(
                 user_id=job.user_id,
                 session_id=job.workflow_id,
                 new_message=message,
             ):
-                if event.is_final_response():
-                    logger.info(
-                        "workflow.run.final",
-                        extra={"workflow_id": job.workflow_id},
+                if logger.isEnabledFor(logging.DEBUG):
+                    is_final = (
+                        event.is_final_response()
+                        if hasattr(event, "is_final_response")
+                        else False
                     )
-            logger.info("workflow.run.complete", extra={"workflow_id": job.workflow_id})
+                    logger.debug(
+                        "workflow.run.event workflow_id=%s type=%s is_final=%s",
+                        job.workflow_id,
+                        type(event).__name__,
+                        is_final,
+                    )
+                if hasattr(event, "is_final_response") and event.is_final_response():
+                    logger.info(
+                        "workflow.run.final_response workflow_id=%s",
+                        job.workflow_id,
+                    )
+
+            logger.info("workflow.run.complete workflow_id=%s", job.workflow_id)
         except Exception:
             logger.exception(
-                "workflow.run.failed", extra={"workflow_id": job.workflow_id}
+                "workflow.run.failed workflow_id=%s",
+                job.workflow_id,
             )
 
     async def _validate_product(self, product_id: str) -> Product:
