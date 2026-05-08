@@ -1,57 +1,53 @@
+import os
+
+from dotenv import load_dotenv
 from google.adk.agents import Agent
+from google.adk.agents.remote_a2a_agent import AGENT_CARD_WELL_KNOWN_PATH, RemoteA2aAgent
 
-def request_for_quote(vendor: str) -> str:
-    """
-    Request for quote from the vendor
-    @param vendor: The vendor to request for quote
-    @return: The quote from the vendor
-    """
-    return f"The quote from the vendor {vendor} is 1000"
+load_dotenv()
 
-def negotiate_with_vendor(vendor: str, proposed_price: int) -> str:
-    """
-    Negotiate with the vendor for the best price
-    @param vendor: The vendor to negotiate with
-    @param proposed_price: The proposed price
-    @return: The negotiated price
-    """
-    return f"The negotiated price with the vendor {vendor} is {proposed_price}"
+VENDOR_AGENT_CARD_URL = os.getenv(
+    "VENDOR_A2A_AGENT_CARD_URL",
+    f"http://127.0.0.1:8001/a2a/procu_forge_vendor{AGENT_CARD_WELL_KNOWN_PATH}",
+)
 
-def follow_up_with_vendor(vendor: str) -> str:
-    """
-    Follow up with the vendor for the best price
-    @param vendor: The vendor to follow up with
-    @return: The follow up with the vendor
-    """
-
-    follow_up_price = '900' if vendor == 'Ghi' else '950'
-
-    return f"The follow up with the vendor {vendor} is {follow_up_price}"
-
-
-# def send_message_to_vendor(vendor: str, message: str) -> str:
-#     """
-#     Send Message to the vendor
-#     @param vendor: The vendor to send message to
-#     @param message: The message to send to the vendor
-#     @return: The message sent to the vendor
-#     """
-#     return f"The message {message} sent to the vendor {vendor}"
-
+vendor_remote_agent = RemoteA2aAgent(
+    name="procu_forge_vendor",
+    description="External vendor agent reachable over A2A; issues quotes and negotiates.",
+    agent_card=VENDOR_AGENT_CARD_URL,
+)
 
 negotiator_agent = Agent(
     name="negotiator_agent",
     model="gemini-flash-latest",
-    description="A agent that negotiates with vendors",
+    description="Negotiates quotes with external vendors over the A2A protocol.",
     instruction="""
-    You are a helpful assistant that negotiates with vendors for better prices. 
-    Steps:
-        1. Request for quote from the vendor
-        2. Negotiate with the vendor based on their response
-    You have the following tools: 
-    send_message_to_vendor
+    You are the **buyer-side** negotiator. You communicate with external vendors over A2A.
 
-    After completing the negotiation or sending the message, tranfer it to the master agent
+    For each candidate vendor line or RFQ the orchestrator gives you:
+      1. Message the external party **procu_forge_vendor** and request a quote. Include:
+         product_id, quantity, currency, required_by (if known), and any constraints (budget/urgency).
+      2. After the vendor returns a quote (unit_price, quote_id, lead_time_days), propose a
+         counter-offer at roughly **92%** of their quoted unit price (rounded sensibly), unless
+         their price already meets budget—then you may accept.
+      3. Continue the dialogue with **procu_forge_vendor** until they accept your price,
+         you accept their final offer, or they state **best and final**. Then stop countering.
+      4. Repeat the above for multiple vendors when the orchestrator provides multiple vendor options.
+         Keep a small table of outcomes internally.
+      5. When terms are agreed, ensure the vendor confirms (accept_offer / confirmation id) and
+         return a negotiation summary for the master agent:
+         - quote_id (if any)
+         - agreed unit_price and line total (unit_price × quantity)
+         - lead_time_days
+         - vendor_confirmation_id or reference from the vendor
+
+    Rules:
+    - The vendor is a separate party. Do not \"delegate\" your job to them; you remain responsible
+      for driving the negotiation.
+    - Do not invent vendor replies; only use what **procu_forge_vendor** returns.
+    - Keep tone professional. Return structured numbers when the vendor provides them.
+
+    After negotiation completes, transfer control back to the master/orchestrator agent.
     """,
-    tools=[request_for_quote, negotiate_with_vendor, follow_up_with_vendor],
+    sub_agents=[vendor_remote_agent],
 )

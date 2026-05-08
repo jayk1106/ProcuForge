@@ -1,0 +1,32 @@
+{
+  "name": "procu_forge_vendor",
+  "description": "Vendor sales agent that issues quotes and negotiates pricing for procurement RFQs.",
+  "version": "0.1.0",
+  "url": "http://127.0.0.1:8001/a2a/procu_forge_vendor",
+  "defaultInputModes": ["text/plain"],
+  "defaultOutputModes": ["text/plain", "application/json"],
+  "capabilities": {
+    "streaming": false,
+    "pushNotifications": false
+  },
+  "skills": [
+    {
+      "id": "request_for_quote",
+      "name": "Request for Quote",
+      "description": "Issue an initial quote for a product RFQ.",
+      "tags": ["rfq", "quote"]
+    },
+    {
+      "id": "negotiate",
+      "name": "Negotiate Price",
+      "description": "Respond to buyer counter-offers within vendor floor price.",
+      "tags": ["negotiation"]
+    },
+    {
+      "id": "accept_offer",
+      "name": "Accept Final Offer",
+      "description": "Confirm an accepted offer and emit a reference id.",
+      "tags": ["confirmation"]
+    }
+  ]
+}
