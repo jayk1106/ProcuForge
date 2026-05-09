@@ -3,6 +3,7 @@ import os
 from dotenv import load_dotenv
 from google.adk.agents import Agent
 from google.adk.agents.remote_a2a_agent import AGENT_CARD_WELL_KNOWN_PATH, RemoteA2aAgent
+from google.adk.tools.agent_tool import AgentTool
 
 load_dotenv()
 
@@ -16,6 +17,8 @@ vendor_remote_agent = RemoteA2aAgent(
     description="External vendor agent reachable over A2A; issues quotes and negotiates.",
     agent_card=VENDOR_AGENT_CARD_URL,
 )
+
+vendor_remote_agent_tool = AgentTool(agent=vendor_remote_agent)
 
 negotiator_agent = Agent(
     name="negotiator_agent",
@@ -49,5 +52,6 @@ negotiator_agent = Agent(
 
     After negotiation completes, transfer control back to the master/orchestrator agent.
     """,
-    sub_agents=[vendor_remote_agent],
+   #  sub_agents=[vendor_remote_agent],
+   tools=[vendor_remote_agent_tool],
 )
