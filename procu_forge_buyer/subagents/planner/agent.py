@@ -1,63 +1,47 @@
 from google.adk.agents import Agent
 from google.adk.tools.agent_tool import AgentTool
 
+from .callbacks import (
+    inject_planner_session_state_before_model,
+    log_planner_after_agent,
+    log_planner_before_agent,
+)
+from ...state_keys import PLANNER_PLAN_KEY
+
 from .plan import PlannerPlan
 
 PLANNER_INSTRUCTION = """
-You are the **Planner** for buyer-side procurement. You do not call tools or sub-agents.
-You only output a single structured **PlannerPlan** from conversation + **session.state**.
+You are the procurement **Planner**. No tools, no sub-agents—emit exactly one **PlannerPlan**
+(JSON schema) per call.
 
-## Session state (authoritative)
+## Inputs (precedence)
+1. A **session.state** JSON blob is injected as a user message before this call—treat it as
+   ground truth for **request**, **product**, **current_plan** (your prior output), and **vendor_offers**.
+2. The orchestrator may also pass a short tool string—if it conflicts with the JSON, **prefer the JSON**.
 
-- **request**: procurement payload — request_id, organization_id, product_id, quantity, currency,
-  required_by_date, delivery, purpose, urgency, budget_ceiling, buyer_notes, etc.
-- **product**: catalog snapshot — id, name, brand, specifications, pricing, etc.
+## Route to these agents only (names must match **agent_to_invoke**)
+- **vendor_search_agent** — loads **vendor_offers** from **request.product_id**. Choose **search_vendors**
+  when **vendor_offers** is missing, empty, or must be refreshed.
+- **negotiator_agent** — A2A RFQ/negotiation with **procu_forge_vendor**. Choose **request_quote** when
+  **vendor_offers.offers** is non-empty and quotes are not yet settled.
+- **decision_agent** — pick best vendor. Choose **select_vendor** when comparable offer summaries exist.
+- **purchase_manager_agent** — PO + delivery/invoice stubs. Choose **fulfill_purchase** when a winner
+  is chosen and fulfillment is not yet done per transcript.
 
-The orchestrator message may include injected **Request** / **Product** blocks; treat them as
-the same `request` / `product` keys.
+## Ordering (hard)
+- Never **request_quote** before you would be comfortable with supplier lines (from **vendor_offers**
+  or clear transcript equivalents).
+- Never **select_vendor** without negotiation-style facts to compare.
+- Never **fulfill_purchase** without an explicit chosen vendor in state or transcript.
+- **complete** when PO + verification are done per transcript; **agent_to_invoke** = null.
+- **escalate_to_human** when blocked (no offers and no path, repeated failures, missing mandatory
+  fields, policy risk, user asks for a human, or deadlock); **agent_to_invoke** = null.
 
-## Sub-agents you route to (names must match exactly)
-
-1. **vendor_search_agent**
-   - Task: Query Firestore for active vendor-product rows for `request.product_id`;
-     summarize vendorId, pricing, lead time, availability for the orchestrator.
-   - Use **next_action** `search_vendors` and **agent_to_invoke** `vendor_search_agent` when
-     vendor options are unknown, stale, or the user asks to re-search; always first meaningful
-     step when no vendor list exists in the thread yet.
-
-2. **negotiator_agent**
-   - Task: RFQ and price negotiation with external **procu_forge_vendor** over A2A
-     (quotes, counters, acceptance). Uses session `request` fields for RFQ facts.
-   - Use **next_action** `request_quote` and **agent_to_invoke** `negotiator_agent` when
-     at least one candidate vendor is identified (from search or explicit context) and
-     quotes/terms are not yet settled for the needed vendors.
-
-3. **decision_agent**
-   - Task: Choose the single best vendor given negotiation summaries / comparable offers.
-   - Use **next_action** `select_vendor` and **agent_to_invoke** `decision_agent` when
-     negotiation outcomes (or equivalent offer summaries) exist and a choice is still needed.
-
-4. **purchase_manager_agent**
-   - Task: Create PO, verify delivery, verify invoice (stub tools); operational wrap-up.
-   - Use **next_action** `fulfill_purchase` and **agent_to_invoke** `purchase_manager_agent` when
-     a winning vendor has been decided and PO / verification steps are not yet reported done.
-
-## Ordering rules
-
-- Do not choose `request_quote` if no vendors are known yet — prefer `search_vendors`.
-- Do not choose `select_vendor` without usable offer/negotiation summaries for comparison.
-- Do not choose `fulfill_purchase` without a clear chosen vendor from the conversation.
-- Choose **complete** when purchase_manager (or explicit transcript) indicates PO creation and
-  delivery/invoice verification are done; set **agent_to_invoke** to null.
-- Choose **escalate_to_human** with **agent_to_invoke** null when: empty vendor search with
-  no workaround, repeated A2A/tool failures, missing mandatory procurement fields, policy
-  violations, explicit user request for a human, or negotiation deadlocked with no acceptable path.
-
-## Output discipline
-
-- Set **confidence** between 0 and 1 (lower if state is ambiguous).
-- Use **other_context** for short machine-friendly hints (e.g. `{"vendor_ids": ["..."]}`).
-- **reasoning**: one or two sentences citing concrete observations from state or latest messages.
+## Output
+- **confidence** in [0, 1] (lower when ambiguous).
+- **other_context**: small hints only (e.g. vendor id list, blockers)—avoid long prose.
+- **reasoning**: 1–2 sentences citing **request**, **product**, **vendor_offers**, **current_plan**, or
+  the latest user/assistant turns—not generic filler.
 """
 
 planner_agent = Agent(
@@ -69,6 +53,10 @@ planner_agent = Agent(
     instruction=PLANNER_INSTRUCTION,
     model="gemini-flash-latest",
     output_schema=PlannerPlan,
+    output_key=PLANNER_PLAN_KEY,
+    before_agent_callback=log_planner_before_agent,
+    after_agent_callback=log_planner_after_agent,
+    before_model_callback=inject_planner_session_state_before_model,
 )
 
 planner_tool = AgentTool(agent=planner_agent)

@@ -12,6 +12,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from api.schemas.workflow import BuyerSessionRequestState
 from db.collections.product import Product
+from procu_forge_buyer.subagents.planner.plan import PlannerPlan
+from procu_forge_buyer.subagents.vendor_search.schema import ProductVendorOffers
 
 
 class BuyerWorkflowSessionState(BaseModel):
@@ -29,6 +31,20 @@ class BuyerWorkflowSessionState(BaseModel):
     )
     product: Product = Field(
         description="Firestore product document snapshot at workflow start.",
+    )
+    planner_plan: PlannerPlan | None = Field(
+        default=None,
+        description=(
+            "Latest structured plan from planner_agent (next_action, agent_to_invoke, …); "
+            "set by ADK output_key after each planner run."
+        ),
+    )
+    vendor_offers: ProductVendorOffers | None = Field(
+        default=None,
+        description=(
+            "Supplier lines for request.product_id (`productId` + `offers`); "
+            "updated when vendor_search_agent runs load_vendor_offers_for_product."
+        ),
     )
 
     def to_vertex_state(self) -> dict[str, object]:

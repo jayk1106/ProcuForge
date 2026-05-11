@@ -8,9 +8,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.config import APISettings, get_api_settings
+from api.logging_config import configure_app_logging
 from api.routers import health, test, workflow
 
 load_dotenv()
+configure_app_logging()
 
 
 @asynccontextmanager
