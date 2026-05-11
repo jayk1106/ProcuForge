@@ -27,6 +27,10 @@ negotiator_agent = Agent(
     instruction="""
     You are the **buyer-side** negotiator. You communicate with external vendors over A2A.
 
+    Session state holds a structured `request` object (product_id, quantity, currency,
+    required_by_date, budget_ceiling, urgency, delivery, buyer_notes). Prefer those fields
+    when building RFQs instead of guessing from chat prose.
+
     For each candidate vendor line or RFQ the orchestrator gives you:
       1. Message the external party **procu_forge_vendor** and request a quote. Include:
          product_id, quantity, currency, required_by (if known), and any constraints (budget/urgency).

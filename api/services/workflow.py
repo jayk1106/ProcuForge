@@ -8,7 +8,12 @@ from datetime import datetime, timezone
 from fastapi import HTTPException, status
 
 from api.config import APISettings
-from api.schemas.workflow import WorkflowStartRequest, WorkflowStartResponse
+from api.schemas.buyer_workflow_session import BuyerWorkflowSessionState
+from api.schemas.workflow import (
+    BuyerSessionRequestState,
+    WorkflowStartRequest,
+    WorkflowStartResponse,
+)
 from db.collections.product import Product
 from db.firestore.repositories.products import ProductRepository
 
@@ -48,18 +53,28 @@ class WorkflowService:
 
         workflow_id = str(uuid.uuid4())
         user_id = self._settings.workflow_default_user_id
+        started_at = datetime.now(timezone.utc)
+        organization_id = self._resolve_organization_id(request)
+        requester_id = (request.requester_id or self._settings.workflow_default_user_id).strip()
+        buyer_request = BuyerSessionRequestState.from_workflow_start(
+            workflow_id=workflow_id,
+            created_at=started_at,
+            body=request,
+            organization_id=organization_id,
+            requester_id=requester_id,
+        )
 
-        await self._create_session(workflow_id, user_id, request, product)
+        await self._create_session(workflow_id, user_id, buyer_request, product)
 
         response = WorkflowStartResponse(
             workflow_id=workflow_id,
             session_id=workflow_id,
-            started_at=datetime.now(timezone.utc),
+            started_at=started_at,
         )
         job = AgentJob(
             workflow_id=workflow_id,
             user_id=user_id,
-            prompt=self._build_prompt(request, product),
+            prompt=self._build_kickoff_prompt(buyer_request.request_id),
         )
         return response, job
 
@@ -99,8 +114,6 @@ class WorkflowService:
                 role="user",
                 parts=[genai_types.Part(text=job.prompt)],
             )
-
-            print(job.prompt)
 
             for event in runner.run(
                 user_id=job.user_id,
@@ -146,11 +159,23 @@ class WorkflowService:
             )
         return product
 
+    def _resolve_organization_id(self, request: WorkflowStartRequest) -> str:
+        org = request.organization_id or self._settings.workflow_default_organization_id
+        if not org or not org.strip():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "organization_id is required unless WORKFLOW_DEFAULT_ORGANIZATION_ID "
+                    "is configured."
+                ),
+            )
+        return org.strip()
+
     async def _create_session(
         self,
         workflow_id: str,
         user_id: str,
-        request: WorkflowStartRequest,
+        buyer_request: BuyerSessionRequestState,
         product: Product,
     ) -> None:
         from google.adk.sessions import VertexAiSessionService
@@ -159,15 +184,16 @@ class WorkflowService:
             project=self._settings.vertex_project_id,
             location=self._settings.vertex_location,
         )
+        session_state = BuyerWorkflowSessionState(
+            request=buyer_request,
+            product=product,
+        ).to_vertex_state()
         try:
             await session_service.create_session(
                 app_name=self._settings.reasoning_engine_app_name,
                 user_id=user_id,
                 session_id=workflow_id,
-                state={
-                    "request": request.model_dump(mode="json"),
-                    "product": product.model_dump(mode="json", by_alias=True),
-                },
+                state=session_state,
             )
         except Exception as exc:
             logger.exception(
@@ -195,23 +221,9 @@ class WorkflowService:
             )
 
     @staticmethod
-    def _build_prompt(request: WorkflowStartRequest, product: Product) -> str:
-        loc = request.delivery_location
-        notes = (
-            "\n- " + "\n- ".join(request.buyer_notes)
-            if request.buyer_notes
-            else " (none)"
-        )
+    def _build_kickoff_prompt(request_id: str) -> str:
         return (
-            "Initiate a procurement workflow with the following parameters:\n"
-            f"- Product: {product.name} (id={product.id}, brand={product.brand})\n"
-            f"- Quantity: {request.quantity}\n"
-            f"- Required by: {request.required_by.isoformat()}\n"
-            f"- Urgency: {request.urgency.value}\n"
-            f"- Budget ceiling: {request.budget_ceiling} {request.currency}\n"
-            f"- Delivery location: {loc.address}, {loc.city}, {loc.state}, "
-            f"{loc.country} - {loc.pincode}\n"
-            f"- Buyer notes:{notes}\n\n"
-            "Begin by searching for suitable vendors, then proceed with the standard "
-            "negotiation, decision, purchase order and verification stages."
+            f"Start procurement workflow {request_id}. "
+            "Use session state for all parameters (request, product); do not ask the user "
+            "to repeat them unless something is missing from state."
         )

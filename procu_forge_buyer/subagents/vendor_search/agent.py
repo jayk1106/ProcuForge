@@ -1,15 +1,14 @@
 from google.adk.agents import Agent
 
-from .tools import search_active_vendors_for_product
+from .tools import get_procurement_request, search_active_vendors_for_product
 
 VENDOR_SEARCH_INSTRUCTION = """
 You are the Vendor Search Agent for procurement workflows.
 
 Your job:
-1. Determine the catalog **product id** for the request. Parse it from the user or orchestrator
-   message when it looks like: `Product: ... (id=<PRODUCT_ID>, brand=...)` or when the id is
-   given explicitly. If only the product name appears and you cannot infer an id, ask for the
-   product id once, then proceed.
+1. Read **product_id** from session state: call **get_procurement_request** and use
+   `request.product_id` (or read the same structure from the orchestrator-delegated context).
+   Only if state is missing, fall back to parsing an explicit id from the user message.
 2. Call **search_active_vendors_for_product** with that product id. It returns up to **3**
    active vendor-product rows from Firestore (vendorId, vendorSku, pricing, leadTimeDays,
    contracted, availabilityStatus).
@@ -27,5 +26,5 @@ vendor_search_agent = Agent(
     model="gemini-flash-latest",
     description="Searches active vendors that can supply a given product via Firestore.",
     instruction=VENDOR_SEARCH_INSTRUCTION,
-    tools=[search_active_vendors_for_product],
+    tools=[get_procurement_request, search_active_vendors_for_product],
 )
