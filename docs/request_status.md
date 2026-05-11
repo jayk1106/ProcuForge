@@ -2,16 +2,17 @@
 
 Every Purchase Request (PR) has a single top-level `pr_status` at any given moment. This is a derived value — computed from the underlying agent states — and represents the current overall state of the workflow.
 
-**Total statuses:** 20
+**Total statuses:** 21
 
 ---
 
 ## Initiation
 
-| Status               | Meaning                                                                                          |
-| -------------------- | ------------------------------------------------------------------------------------------------ |
-| `INITIATED`          | PR has just been submitted by the user. Buyer agent is preparing to discover vendors.            |
-| `VENDORS_DISCOVERED` | Buyer agent has shortlisted candidate vendors for this product. Negotiation has not started yet. |
+| Status                   | Meaning                                                                                                                                                                                                 |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `INITIATED`              | PR has just been submitted by the user. Buyer agent is preparing to discover vendors.                                                                                                                   |
+| `VENDORS_DISCOVERED`     | Buyer agent has shortlisted candidate vendors for this product. Negotiation has not started yet.                                                                                                      |
+| `NO_VENDORS_DISCOVERED` | Vendor discovery finished with **no** shortlisted vendors for this product (empty discovery result). Negotiation does not start. Not the same as `NO_VENDOR_AVAILABLE`, which applies after negotiation when every vendor has walked away. |
 
 ## Negotiation
 
@@ -75,7 +76,12 @@ These statuses can occur at any phase and override the normal flow.
 ```
 INITIATED
   → VENDORS_DISCOVERED
+  → NO_VENDORS_DISCOVERED
   → CANCELLED
+
+NO_VENDORS_DISCOVERED
+  → CANCELLED
+  → ESCALATED                (if human may onboard vendors or correct catalog data)
 
 VENDORS_DISCOVERED
   → NEGOTIATION_IN_PROGRESS

@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from api.schemas.workflow import BuyerSessionRequestState
 from db.collections.product import Product
+from procu_forge_buyer.pr_status import PrStatus
 from procu_forge_buyer.subagents.planner.plan import PlannerPlan
 from procu_forge_buyer.subagents.vendor_search.schema import ProductVendorOffers
 
@@ -31,6 +32,14 @@ class BuyerWorkflowSessionState(BaseModel):
     )
     product: Product = Field(
         description="Firestore product document snapshot at workflow start.",
+    )
+    pr_status: PrStatus = Field(
+        default=PrStatus.INITIATED,
+        description="Current purchase-request lifecycle status (see docs/request_status.md).",
+    )
+    previous_pr_status: PrStatus | None = Field(
+        default=None,
+        description="Prior pr_status before the last transition that changed pr_status.",
     )
     planner_plan: PlannerPlan | None = Field(
         default=None,

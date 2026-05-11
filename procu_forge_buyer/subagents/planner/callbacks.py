@@ -2,16 +2,22 @@
 
 from __future__ import annotations
 
+from functools import partial
+from typing import Any
+
 from google.adk.agents.callback_context import CallbackContext
 from google.adk.models.llm_request import LlmRequest
 from google.genai import types
 
 from ...callbacks import (
-    manage_log_after_planner as log_planner_after_agent,
-    manage_log_before_planner as log_planner_before_agent,
+    _plan_summary,
+    _request_id,
     _session_state_dict,
     _state_json_for_injection,
+    managed_log_after_handler,
+    managed_log_before_handler,
 )
+from ...state_keys import PLANNER_PLAN_KEY
 
 
 def inject_planner_session_state_before_model(
@@ -29,3 +35,33 @@ def inject_planner_session_state_before_model(
         types.Content(role="user", parts=[types.Part(text=text)])
     )
     return None
+
+
+def _planner_before(ctx: CallbackContext, st: dict[str, Any]) -> str:
+    return "session_id=%s request_id=%s prior_plan=%s" % (
+        ctx.session.id,
+        _request_id(st) or "",
+        _plan_summary(st.get(PLANNER_PLAN_KEY)),
+    )
+
+
+def _planner_after(ctx: CallbackContext, st: dict[str, Any]) -> str:
+    return "session_id=%s request_id=%s plan=%s" % (
+        ctx.session.id,
+        _request_id(st) or "",
+        _plan_summary(st.get(PLANNER_PLAN_KEY)),
+    )
+
+
+log_planner_before_agent = partial(
+    managed_log_before_handler, span="PLANNER", detail_line=_planner_before
+)
+log_planner_after_agent = partial(
+    managed_log_after_handler, span="PLANNER", detail_line=_planner_after, trailing_lines=None
+)
+
+__all__ = [
+    "inject_planner_session_state_before_model",
+    "log_planner_after_agent",
+    "log_planner_before_agent",
+]

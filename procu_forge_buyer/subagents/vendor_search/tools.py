@@ -8,6 +8,7 @@ from db.collections.vendor_product import VendorProduct
 from db.firestore.client import get_firestore_client
 from db.firestore.repositories.vendor_products import VendorProductRepository
 
+from ...pr_status_transitions import transition_after_vendor_discovery
 from ...state_keys import VENDOR_OFFERS_KEY
 from .schema import ProductVendorOffers, VendorOffer
 
@@ -57,6 +58,7 @@ async def load_vendor_offers_for_product(tool_context: ToolContext) -> dict[str,
     block = ProductVendorOffers(product_id=product_id_str, offers=offers)
     payload = block.model_dump(mode="json", by_alias=True)
     tool_context.state[VENDOR_OFFERS_KEY] = payload
+    transition_after_vendor_discovery(tool_context.state, offer_count=len(offers))
 
     return {
         "ok": True,
