@@ -1,18 +1,23 @@
 from google.adk.agents import Agent
-from pydantic import BaseModel, Field
 
+from .callbacks import after_model_parse_vendor_and_transition
 
-class DecisionOutput(BaseModel):
-    vendor: str = Field(description="The best vendor for our usecase")
+DECISION_INSTRUCTION = """
+You are the **decision_agent**. Choose the single best vendor for this procurement.
 
+Use **vendor_offers** and negotiation facts in session state or the conversation.
+Do not invent vendors or prices.
+
+Output **exactly one line** of JSON and nothing else, in this shape:
+{"vendor": "<winning_vendor_id_or_name>"}
+
+The workflow loop will run the next step. Do not call tools or transfer to other agents.
+"""
 
 decision_agent = Agent(
     name="decision_agent",
-    description="A agent that makes decisions",
-    instruction="""
-    You are a helpful assistant that makes decisions regarding the who is the best vendor for our usecase
-    After getting final vendor decision, tranfer it to the master agent
-    """,
+    description="Selects the winning vendor from offers and negotiation outcomes.",
+    instruction=DECISION_INSTRUCTION,
     model="gemini-flash-latest",
-    output_schema=DecisionOutput
+    after_model_callback=after_model_parse_vendor_and_transition,
 )

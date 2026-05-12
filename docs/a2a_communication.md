@@ -93,8 +93,8 @@ Run independently with **each vendor**. Capped at **3 rounds**. Buyer agent deci
   "timestamp": "2026-05-09T10:00:00Z",
   "payload": {
     "item": {
+      "product_id": "prod_widget_a",
       "sku": "ITEM-001",
-      "description": "Industrial widget, grade A",
       "quantity": 100,
       "unit": "pcs"
     },
@@ -112,6 +112,8 @@ Run independently with **each vendor**. Capped at **3 rounds**. Buyer agent deci
 ```json
 {
   "payload": {
+    "product_id": "prod_widget_a",
+    "sku": "ITEM-001",
     "unit_price": 50.0,
     "total_price": 5000.0,
     "currency": "USD",
@@ -131,6 +133,8 @@ Run independently with **each vendor**. Capped at **3 rounds**. Buyer agent deci
 ```json
 {
   "payload": {
+    "product_id": "prod_widget_a",
+    "sku": "ITEM-001",
     "proposed_unit_price": 45.0,
     "proposed_total_price": 4500.0,
     "currency": "USD",
@@ -153,6 +157,8 @@ The `decision` field carries the vendor's stance:
 ```json
 {
   "payload": {
+    "product_id": "prod_widget_a",
+    "sku": "ITEM-001",
     "decision": "COUNTER",
     "unit_price": 47.0,
     "total_price": 4700.0,
@@ -171,6 +177,8 @@ The `decision` field carries the vendor's stance:
 ```json
 {
   "payload": {
+    "product_id": "prod_widget_a",
+    "sku": "ITEM-001",
     "agreed_unit_price": 47.0,
     "agreed_total_price": 4700.0,
     "currency": "USD",
@@ -187,6 +195,8 @@ The `decision` field carries the vendor's stance:
 ```json
 {
   "payload": {
+    "product_id": "prod_widget_a",
+    "sku": "ITEM-001",
     "reason": "MAX_ROUNDS_REACHED",
     "last_offer": 47.0,
     "last_counter": 45.0

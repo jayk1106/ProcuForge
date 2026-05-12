@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from functools import partial
 from typing import Any
 
 from google.adk.agents.callback_context import CallbackContext
+from google.genai import types
 
 from ...callbacks import (
     _plan_summary,
@@ -14,8 +16,32 @@ from ...callbacks import (
     managed_log_after_handler,
     managed_log_before_handler,
 )
+from ...pr_status import PrStatus
 from ...pr_status_transitions import pr_status_line
-from ...state_keys import PLANNER_PLAN_KEY, VENDOR_OFFERS_KEY
+from ...state_keys import PLANNER_PLAN_KEY, PR_STATUS_KEY, VENDOR_OFFERS_KEY
+
+logger = logging.getLogger(__name__)
+
+
+def skip_vendor_search_unless_initiated(callback_context: CallbackContext) -> types.Content | None:
+    """Avoid re-running catalog load after discovery/negotiation (router mis-delegation)."""
+    raw = callback_context.state.get(PR_STATUS_KEY)
+    if raw in (None, ""):
+        return None
+    try:
+        status = PrStatus(str(raw))
+    except ValueError:
+        logger.warning("vendor_search skip unknown pr_status=%r", raw)
+        callback_context.actions.skip_summarization = True
+        return types.Content(role="model", parts=[types.Part(text=" ")])
+    if status == PrStatus.INITIATED:
+        return None
+    logger.info(
+        "vendor_search_agent skip_wrong_phase pr_status=%s (only runs when INITIATED)",
+        status.value,
+    )
+    callback_context.actions.skip_summarization = True
+    return types.Content(role="model", parts=[types.Part(text=" ")])
 
 
 def _offers_count_teaser(st: dict[str, Any]) -> str:
@@ -96,4 +122,8 @@ log_vendor_search_after_agent = partial(
     trailing_lines=_vendor_trailing,
 )
 
-__all__ = ["log_vendor_search_after_agent", "log_vendor_search_before_agent"]
+__all__ = [
+    "log_vendor_search_after_agent",
+    "log_vendor_search_before_agent",
+    "skip_vendor_search_unless_initiated",
+]

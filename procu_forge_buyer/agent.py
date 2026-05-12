@@ -1,8 +1,14 @@
 from dotenv import load_dotenv
-from google.adk.agents import Agent
+from google.adk.agents import Agent, LoopAgent
 
-from .callbacks import manage_log_after_orchestrator, manage_log_before_orchestrator
-from .subagents.planner import planner_tool
+from .logging_config import configure_buyer_logging
+from .callbacks import (
+    manage_log_after_orchestrator,
+    manage_log_before_orchestrator,
+    manage_log_after_pr_router,
+    manage_log_before_pr_router,
+    stop_loop_if_terminal,
+)
 from .subagents.vendor_search import vendor_search_agent
 from .subagents.negotiator import negotiator_agent
 from .subagents.decision import decision_agent
@@ -10,62 +16,87 @@ from .subagents.purchase_manager import purchase_manager_agent
 
 load_dotenv()
 
-ORCHESTRATOR_INSTRUCTION = """
-You are the buyer orchestrator: run the procurement workflow by calling the planner, then delegating.
+PR_ROUTER_INSTRUCTION = """
+You are **pr_router**, the loop controller for buyer procurement.
 
-## Goal
-Close the run with a correct outcome: either a professional wrap-up when the workflow is done,
-or a clear handoff when the planner says to escalate.
+Read **session.state** first — especially **pr_status**, **vendor_offers**, **request**, **selected_vendor**.
+Authoritative lifecycle: **docs/request_status.md**.
 
-## Canonical state (trust order)
-If chat disagrees with state, prefer **request** and **product** unless the user explicitly corrects them.
-Then **current_plan** (latest planner output), then **vendor_offers** (supplier lines after the vendor step).
+## Mechanism
+- On each **pr_router** turn, call **transfer_to_agent** exactly once with a worker name below **unless**
+  **pr_status** is terminal or human-gated (then produce no tool call — the outer loop stops from **pr_status**).
+- Only **transfer_to_agent** exists; do not invent other function names.
+- Do **not** write user-facing prose except what the framework requires.
 
-## Injected snapshot
-Request:
-{request?}
+## Hard rules
+1. **After negotiation finishes**, **pr_status** becomes **NEGOTIATION_COMPLETED**. You MUST then call
+   **transfer_to_agent** with agent name **decision_agent** — never **vendor_search_agent** and never
+   **negotiator_agent** for that turn.
+2. Call **vendor_search_agent** ONLY when **pr_status** is **INITIATED** AND (**vendor_offers** is
+   missing or **offers** is empty). Never use **vendor_search_agent** for **VENDORS_DISCOVERED**,
+   **NEGOTIATION_***, **NEGOTIATION_COMPLETED**, or any later status — control must return to you
+   (**pr_router**) after each worker, then delegate forward.
 
-Product:
-{product?}
+## Decision table by **pr_status**
+- **INITIATED** — If **vendor_offers** is missing or **offers** is empty:
+  **transfer_to_agent** ``vendor_search_agent``. Otherwise **transfer_to_agent**
+  ``negotiator_agent``.
+- **VENDORS_DISCOVERED** — **transfer_to_agent** ``negotiator_agent``.
+- **NO_VENDORS_DISCOVERED** — Do not delegate; the loop will stop via **pr_status** (terminal).
+- **NEGOTIATION_IN_PROGRESS** — **transfer_to_agent** ``negotiator_agent``.
+- **NEGOTIATION_COMPLETED** — **transfer_to_agent** ``decision_agent`` (required next step after negotiation).
+- **NO_VENDOR_AVAILABLE** — Do not delegate; terminal.
+- **VENDOR_SELECTED** — **transfer_to_agent** ``purchase_manager_agent``.
+- **AWAITING_USER_APPROVAL** — Do not delegate; human gate (**pr_status** stops the loop).
+- **PO_ISSUED**, **PO_ACKNOWLEDGED**, **PO_REJECTED**, **AWAITING_DELIVERY**,
+  **GOODS_RECEIVED**, **AWAITING_INVOICE**, **INVOICE_UNDER_VERIFICATION**,
+  **INVOICE_CORRECTION_PENDING**, **INVOICE_VERIFIED** — **transfer_to_agent**
+  ``purchase_manager_agent``.
+- **READY_FOR_PAYMENT** — Do not delegate; human gate.
+- **COMPLETED**, **CANCELLED**, **ESCALATED** — Do not delegate; terminal or handled via **pr_status**.
 
-Current plan (after planner runs):
-{current_plan?}
-
-Vendor offers (after vendor_search_agent runs):
-{vendor_offers?}
-
-## Planner (required)
-Call the **planner_agent** tool first on each turn, and again **after** vendor_search_agent,
-negotiator_agent, decision_agent, or purchase_manager_agent returns—before delegating further.
-The tool returns a **PlannerPlan**; the same object is stored under **current_plan** in session state.
-
-## Execute the plan
-- **search_vendors** | **request_quote** | **select_vendor** | **fulfill_purchase** → delegate to
-  **agent_to_invoke** exactly: vendor_search_agent, negotiator_agent, decision_agent, or purchase_manager_agent.
-- **escalate_to_human** → do not delegate; explain using **reasoning** and ask how to proceed.
-- **complete** → do not delegate; give a concise factual summary using state and transcript.
-
-If the user gives a lawful override, acknowledge **current_plan** first, then follow the user.
-
-## Delegates (one line each)
-- **vendor_search_agent** — persists **vendor_offers** from **request.product_id**.
-- **negotiator_agent** — A2A with external vendor agent.
-- **decision_agent** — pick winning vendor from offers / summaries.
-- **purchase_manager_agent** — PO and delivery/invoice steps (tools).
-
-Rules: stay formal; if vendor replies are pending, say so or refresh the plan before pushing ahead.
-
-TONE: formal and professional.
+If **pr_status** is missing, treat as **INITIATED** and apply the **INITIATED** row.
+If **pr_status** is an unknown value but **vendor_offers** has **offers**: **transfer_to_agent**
+``negotiator_agent`` (never **vendor_search_agent** unless you are certain you are in **INITIATED**
+with empty offers). If **offers** is empty: **transfer_to_agent** ``vendor_search_agent`` only if
+you infer **INITIATED**; otherwise **transfer_to_agent** ``negotiator_agent``.
 """
 
-
-root_agent = Agent(
-    name="procu_forge_buyer",
-    description="You are the orchestrator agent. You are responsible for coordinating the other agents to achieve the goal.",
-    instruction=ORCHESTRATOR_INSTRUCTION,
+pr_router = Agent(
+    name="pr_router",
+    description=(
+        "Routes the procurement workflow: reads pr_status and delegates to "
+        "vendor_search, negotiator, decision, or purchase_manager. "
+        "Terminal and human-gated states rely on pr_status, not exit_loop."
+    ),
+    instruction=PR_ROUTER_INSTRUCTION,
     model="gemini-flash-latest",
+    sub_agents=[
+        vendor_search_agent,
+        negotiator_agent,
+        decision_agent,
+        purchase_manager_agent,
+    ],
+    before_agent_callback=[
+        stop_loop_if_terminal,
+        manage_log_before_pr_router,
+    ],
+    after_agent_callback=[
+        manage_log_after_pr_router,
+        stop_loop_if_terminal,
+    ],
+)
+
+root_agent = LoopAgent(
+    name="procu_forge_buyer",
+    description=(
+        "Buyer workflow loop: runs pr_router until pr_status is terminal/human-gated "
+        "(callback), or max_iterations is reached."
+    ),
+    sub_agents=[pr_router],
+    max_iterations=15,
     before_agent_callback=manage_log_before_orchestrator,
     after_agent_callback=manage_log_after_orchestrator,
-    tools=[planner_tool],
-    sub_agents=[vendor_search_agent, negotiator_agent, decision_agent, purchase_manager_agent],
-) 
+)
+
+configure_buyer_logging()

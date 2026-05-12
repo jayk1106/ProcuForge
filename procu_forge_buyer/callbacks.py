@@ -9,13 +9,16 @@ from functools import partial
 from typing import Any
 
 from google.adk.agents.callback_context import CallbackContext
+from google.genai import types
 
-from .pr_status_transitions import pr_status_line
-from .state_keys import PLANNER_PLAN_KEY
+from .pr_status_transitions import STOP_PR_STATUSES, pr_status_line
+from .state_keys import PLANNER_PLAN_KEY, PR_STATUS_KEY
 
 logger = logging.getLogger(__name__)
 
 _MAX_STATE_JSON_CHARS = 24_000
+
+_STOP_PR_STATUS_VALUES = frozenset(s.value for s in STOP_PR_STATUSES)
 
 
 def _session_state_dict(callback_context: CallbackContext) -> dict[str, Any]:
@@ -136,3 +139,52 @@ manage_log_before_orchestrator = partial(
 manage_log_after_orchestrator = partial(
     managed_log_after_handler, span="ORCHESTRATOR", detail_line=_orch_after, trailing_lines=None
 )
+
+
+def _pr_router_before(ctx: CallbackContext, st: dict[str, Any]) -> str:
+    return (
+        "pr_router start session_id=%s request_id=%s product_id=%s plan=%s %s"
+        % (
+            ctx.session.id,
+            _request_id(st) or "",
+            _product_id(st) or "",
+            _plan_summary(st.get(PLANNER_PLAN_KEY)),
+            pr_status_line(st),
+        )
+    )
+
+
+def _pr_router_after(ctx: CallbackContext, st: dict[str, Any]) -> str:
+    return (
+        "pr_router end session_id=%s request_id=%s product_id=%s plan=%s %s"
+        % (
+            ctx.session.id,
+            _request_id(st) or "",
+            _product_id(st) or "",
+            _plan_summary(st.get(PLANNER_PLAN_KEY)),
+            pr_status_line(st),
+        )
+    )
+
+
+manage_log_before_pr_router = partial(
+    managed_log_before_handler, span="PR_ROUTER", detail_line=_pr_router_before
+)
+manage_log_after_pr_router = partial(
+    managed_log_after_handler, span="PR_ROUTER", detail_line=_pr_router_after, trailing_lines=None
+)
+
+
+def stop_loop_if_terminal(callback_context: CallbackContext) -> types.Content | None:
+    """Exit the enclosing ``LoopAgent`` when ``pr_status`` is terminal or human-gated.
+
+    Returns a minimal model ``Content`` so ADK emits an ``Event`` carrying
+    ``actions.escalate`` (actions-only callbacks do not always yield an event).
+    """
+    status = callback_context.state.get(PR_STATUS_KEY)
+    if status not in _STOP_PR_STATUS_VALUES:
+        return None
+    callback_context.actions.escalate = True
+    callback_context.actions.skip_summarization = True
+    logger.info("loop_exit reason=pr_status_terminal pr_status=%s", status)
+    return types.Content(role="model", parts=[types.Part(text=" ")])

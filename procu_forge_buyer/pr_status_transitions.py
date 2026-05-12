@@ -12,6 +12,32 @@ logger = logging.getLogger(__name__)
 
 _STATUS_CHANGED_BANNER = "------ status changed -----"
 
+TERMINAL_PR_STATUSES: frozenset[PrStatus] = frozenset(
+    {
+        PrStatus.COMPLETED,
+        PrStatus.CANCELLED,
+        PrStatus.NO_VENDORS_DISCOVERED,
+        PrStatus.NO_VENDOR_AVAILABLE,
+    }
+)
+
+HUMAN_GATED_PR_STATUSES: frozenset[PrStatus] = frozenset(
+    {
+        PrStatus.ESCALATED,
+        PrStatus.AWAITING_USER_APPROVAL,
+        PrStatus.READY_FOR_PAYMENT,
+    }
+)
+
+STOP_PR_STATUSES: frozenset[PrStatus] = TERMINAL_PR_STATUSES | HUMAN_GATED_PR_STATUSES
+
+_NEGOTIATION_SOURCE_STATUSES: frozenset[PrStatus] = frozenset(
+    {
+        PrStatus.VENDORS_DISCOVERED,
+        PrStatus.NEGOTIATION_IN_PROGRESS,
+    }
+)
+
 _INITIATION_PHASE: frozenset[PrStatus] = frozenset(
     {
         PrStatus.INITIATED,
@@ -59,6 +85,63 @@ def transition_after_vendor_discovery(
         current.value,
         new.value,
         offer_count,
+    )
+
+
+def transition_after_negotiation(state: MutableMapping[str, Any]) -> None:
+    """Minimal happy path: move from discovery/negotiation to ``NEGOTIATION_COMPLETED``."""
+    current = _parse_current(state.get(PR_STATUS_KEY))
+    if current == PrStatus.NEGOTIATION_COMPLETED:
+        return
+    if current not in _NEGOTIATION_SOURCE_STATUSES:
+        return
+
+    new = PrStatus.NEGOTIATION_COMPLETED
+    state[PREVIOUS_PR_STATUS_KEY] = current.value
+    state[PR_STATUS_KEY] = new.value
+    logger.info(_STATUS_CHANGED_BANNER)
+    logger.info(
+        "pr_status %s -> %s (negotiation complete)",
+        current.value,
+        new.value,
+    )
+
+
+def transition_after_decision(state: MutableMapping[str, Any]) -> None:
+    """Minimal happy path: ``NEGOTIATION_COMPLETED`` -> ``VENDOR_SELECTED``."""
+    current = _parse_current(state.get(PR_STATUS_KEY))
+    if current == PrStatus.VENDOR_SELECTED:
+        return
+    if current != PrStatus.NEGOTIATION_COMPLETED:
+        return
+
+    new = PrStatus.VENDOR_SELECTED
+    state[PREVIOUS_PR_STATUS_KEY] = current.value
+    state[PR_STATUS_KEY] = new.value
+    logger.info(_STATUS_CHANGED_BANNER)
+    logger.info(
+        "pr_status %s -> %s (vendor selected)",
+        current.value,
+        new.value,
+    )
+
+
+def transition_after_fulfillment(state: MutableMapping[str, Any]) -> None:
+    """Minimal happy path: ``VENDOR_SELECTED`` -> ``COMPLETED`` (stub fulfillment)."""
+    current = _parse_current(state.get(PR_STATUS_KEY))
+    if current == PrStatus.COMPLETED:
+        return
+    if current != PrStatus.VENDOR_SELECTED:
+        return
+
+    new = PrStatus.COMPLETED
+    state[PREVIOUS_PR_STATUS_KEY] = current.value
+    state[PR_STATUS_KEY] = new.value
+    logger.info(_STATUS_CHANGED_BANNER)
+    logger.info(
+        "pr_status %s -> %s (fulfillment stub complete)",
+        current.value,
+        new.value,
     )
 
 

@@ -44,8 +44,8 @@ class BuyerWorkflowSessionState(BaseModel):
     planner_plan: PlannerPlan | None = Field(
         default=None,
         description=(
-            "Latest structured plan from planner_agent (next_action, agent_to_invoke, …); "
-            "set by ADK output_key after each planner run."
+            "Optional structured plan (next_action, agent_to_invoke, …) if written by tooling; "
+            "orchestrator does not require this field."
         ),
     )
     vendor_offers: ProductVendorOffers | None = Field(

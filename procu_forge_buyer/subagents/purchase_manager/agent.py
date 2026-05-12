@@ -1,5 +1,7 @@
 from google.adk.agents import Agent
 
+from .callbacks import purchase_manager_after_agent
+
 
 def create_purchase_order(vendor: str, product: str, quantity: int) -> str:
     """
@@ -38,8 +40,9 @@ purchase_manager_agent = Agent(
         3. Verify the invoice
     You have the following tools:
     create_purchase_order, verify_delivery, verify_invoice
-    After completing the purchase, tranfer it to the master agent
+    After verifying the invoice, stop. The workflow loop will advance **pr_status**.
     """,
     model="gemini-flash-latest",
     tools=[create_purchase_order, verify_delivery, verify_invoice],
+    after_agent_callback=purchase_manager_after_agent,
 )
