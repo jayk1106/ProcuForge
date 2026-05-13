@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -10,7 +9,7 @@ from google.adk.agents.remote_a2a_agent import AGENT_CARD_WELL_KNOWN_PATH, Remot
 from google.adk.tools.agent_tool import AgentTool
 from google.adk.tools.base_tool import ToolContext
 
-from procu_forge_buyer.schema import MessageType
+from communication import A2AMessageBuilder, MessageType
 from procu_forge_buyer.state_keys import NEGOTIATION_CONFIG_KEY, VENDOR_OFFERS_KEY
 
 VENDOR_AGENT_CARD_URL = os.getenv(
@@ -101,64 +100,6 @@ def _init_vendor_config(state: dict[str, Any], vendor_id: str) -> dict[str, Any]
     }
 
 
-def _build_item(
-    product: dict[str, Any],
-    *,
-    price: Any,
-    walkaway_reason: Any,
-    message_type: MessageType,
-) -> dict[str, Any]:
-    quantity = _to_quantity(product.get("quantity"))
-    unit_price = _to_float(price)
-
-    item: dict[str, Any] = {
-        "product_id": str(product.get("id") or ""),
-        "sku": str(product.get("sku") or ""),
-        "quantity": quantity,
-        "unit": str(product.get("unit") or ""),
-        "currency": str(product.get("currency") or ""),
-        "reason": None,
-    }
-
-    if message_type == MessageType.WALKAWAY:
-        if unit_price is not None:
-            item["last_unit_price"] = unit_price
-            item["last_total_price"] = unit_price * quantity
-        item["reason"] = (
-            walkaway_reason.strip()
-            if isinstance(walkaway_reason, str)
-            else walkaway_reason
-        )
-    elif message_type in (MessageType.COUNTER_OFFER, MessageType.ACCEPT):
-        if unit_price is not None:
-            item["unit_price"] = unit_price
-            item["total_price"] = unit_price * quantity
-
-    return item
-
-
-def _build_communication_payload(
-    *,
-    rfq_id: str,
-    vendor_id: str,
-    message_type: MessageType,
-    round: int,
-    payload: dict[str, Any],
-) -> dict[str, Any]:
-    return {
-        "schema_version": "1.0.0",
-        "message_id": str(uuid4()),
-        "rfq_id": rfq_id,
-        "vendor_id": vendor_id,
-        "from_agent": "buyer_negotiator",
-        "to_agent": "vendor",
-        "message_type": str(message_type),
-        "round": round,
-        "timestamp": datetime.now().isoformat(),
-        "payload": payload,
-    }
-
-
 async def negotiate_with_vendor(
     communication_data: dict[str, Any],
     tool_context: ToolContext,
@@ -214,26 +155,27 @@ async def negotiate_with_vendor(
             return {"ok": False, "error": "send RFQ before other message types"}
         round = int(round) + 1
 
-    now = datetime.now(timezone.utc)
-    communication_payload = _build_communication_payload(
+    product = config.get("product") or {}
+    builder = A2AMessageBuilder(
         rfq_id=config["rfq_id"],
         vendor_id=vendor_id,
-        message_type=message_type,
-        round=round,
-        payload={
-            "item": _build_item(
-                config.get("product") or {},
-                price=price,
-                walkaway_reason=walkaway_reason,
-                message_type=message_type,
-            ),
-            "required_by": (now + timedelta(days=10)).date().isoformat(),
-            "response_deadline": (now + timedelta(days=1))
-            .replace(microsecond=0)
-            .isoformat()
-            .replace("+00:00", "Z"),
-        },
+        product_id=str(product.get("id") or ""),
+        sku=str(product.get("sku") or ""),
+        quantity=_to_quantity(product.get("quantity")),
+        unit=str(product.get("unit") or ""),
+        currency=str(product.get("currency") or ""),
     )
+
+    if message_type == MessageType.RFQ:
+        communication_payload = builder.get_rfq_payload(negotiation_round=round)
+    elif message_type == MessageType.COUNTER_OFFER:
+        communication_payload = builder.get_counter_offer_payload(float(price), round)
+    elif message_type == MessageType.ACCEPT:
+        communication_payload = builder.get_accept_payload(float(price), round)
+    else:
+        communication_payload = builder.get_walkaway_payload(
+            walkaway_reason, round, last_unit_price=_to_float(price)
+        )
 
     print("sending payload", communication_payload)
     config["communications"].append(communication_payload)
