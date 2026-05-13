@@ -1,6 +1,22 @@
 """A2A message envelope builder shared by buyer and vendor agents.
 
 Only constructs payload dicts — no business logic, no state management.
+
+Usage
+-----
+Buyer side (default ``from_agent`` / ``to_agent``)::
+
+    builder = A2AMessageBuilder(rfq_id=..., vendor_id=..., ...)
+    envelope = builder.get_rfq_payload()
+
+Vendor side (swap directions)::
+
+    builder = A2AMessageBuilder(
+        rfq_id=..., vendor_id=..., ...,
+        from_agent=VENDOR_AGENT,
+        to_agent=BUYER_AGENT,
+    )
+    envelope = builder.get_quote_payload(quote_id=..., unit_price=...)
 """
 
 from __future__ import annotations
@@ -13,8 +29,11 @@ from uuid import uuid4
 from .schema import MessageType
 
 _SCHEMA_VERSION = "1.0.0"
-_FROM_AGENT = "buyer_negotiator"
-_TO_AGENT = "vendor"
+
+# Agent identity constants — use these when constructing the builder so both
+# sides share the same canonical string values.
+BUYER_AGENT = "buyer_negotiator"
+VENDOR_AGENT = "vendor"
 
 
 def _utc_now() -> datetime:
@@ -31,6 +50,9 @@ class A2AMessageBuilder:
 
     Fields common to every message in the thread are set at construction.
     Each ``get_*_payload`` method accepts only the values that vary per turn.
+
+    For buyer → vendor messages use the defaults.
+    For vendor → buyer messages pass ``from_agent=VENDOR_AGENT, to_agent=BUYER_AGENT``.
     """
 
     rfq_id: str
@@ -40,8 +62,8 @@ class A2AMessageBuilder:
     quantity: int
     unit: str
     currency: str
-    from_agent: str = _FROM_AGENT
-    to_agent: str = _TO_AGENT
+    from_agent: str = BUYER_AGENT
+    to_agent: str = VENDOR_AGENT
 
     # ── private ──────────────────────────────────────────────────────────────
 
@@ -95,11 +117,14 @@ class A2AMessageBuilder:
         response_deadline: str | None,
     ) -> dict[str, Any]:
         def_required_by, def_deadline = self._deadline_defaults()
-        item = {
-            **self._base_item(),
-            "unit_price": unit_price,
-            "total_price": _r2(unit_price * self.quantity),
-        }
+        item = {**self._base_item()}
+        if message_type != MessageType.WALKAWAY:
+            item["last_unit_price_offer"] = unit_price
+            item["last_total_price_offer"] = _r2(unit_price * self.quantity)
+        else:
+            item["unit_price"] = unit_price
+            item["total_price"] = _r2(unit_price * self.quantity)
+
         return self._envelope(
             message_type,
             negotiation_round,
@@ -110,7 +135,7 @@ class A2AMessageBuilder:
             },
         )
 
-    # ── public builders ──────────────────────────────────────────────────────
+    # ── buyer → vendor builders ───────────────────────────────────────────────
 
     def get_rfq_payload(
         self,
@@ -166,3 +191,54 @@ class A2AMessageBuilder:
             item["last_unit_price"] = last_unit_price
             item["last_total_price"] = _r2(last_unit_price * self.quantity)
         return self._envelope(MessageType.WALKAWAY, negotiation_round, {"item": item})
+
+    # ── vendor → buyer builders ───────────────────────────────────────────────
+
+    def get_quote_payload(
+        self,
+        unit_price: float,
+        negotiation_round: int = 0,
+        *,
+        valid_until: str = "",
+    ) -> dict[str, Any]:
+        """Vendor's initial quote response to an RFQ."""
+        item: dict[str, Any] = {
+            **self._base_item(),
+            "unit_price": _r2(unit_price),
+            "total_price": _r2(unit_price * self.quantity),
+        }
+
+        return self._envelope(
+            MessageType.QUOTE,
+            negotiation_round,
+            {
+                "item": item,
+                "response_deadline": valid_until,
+            },
+        )
+
+    def get_counter_response_payload(
+        self,
+        unit_price: float,
+        negotiation_round: int,
+        *,
+        accepted: bool = False,
+        best_and_final: bool = False,
+        message: str | None = None,
+    ) -> dict[str, Any]:
+        """Vendor's response to a buyer counter-offer."""
+        item: dict[str, Any] = {
+            **self._base_item(),
+            "unit_price": _r2(unit_price),
+            "total_price": _r2(unit_price * self.quantity),
+            "accepted": accepted,
+            "best_and_final": best_and_final,
+        }
+        if message:
+            item["message"] = message
+
+        return self._envelope(
+            MessageType.COUNTER_RESPONSE,
+            negotiation_round,
+            {"item": item},
+        )

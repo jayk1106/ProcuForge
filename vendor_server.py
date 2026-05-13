@@ -6,13 +6,25 @@ vendor agent accumulates context across all turns of a single negotiation thread
 (RFQ → counter-offer → accept / walk-away) instead of starting a fresh session
 on every A2A call.
 
+On the first RFQ for a new rfq_id the converter also seeds ``state_delta`` with
+the canonical vendor state structure so tools and the callback start with a
+complete skeleton from turn 1:
+
+    {
+        "vendor_id":    <from envelope>,
+        "rfq_id":       <from envelope>,
+        "round":        0,
+        "product":      { id, sku, currency, unit, price, quantity },
+        "communication": [ <RFQ envelope> ]
+    }
+
 Sessions are stored in-process (InMemorySessionService) — state does not
 survive a server restart.  Suitable for local development and testing.
 
 Run:
     uv run uvicorn vendor_server:app --host 127.0.0.1 --port 8001
 
-Or as a script (uses uvicorn programmatically):
+Or as a script:
     uv run python vendor_server.py
 
 Environment overrides:
@@ -26,6 +38,7 @@ import json
 import logging
 import os
 from contextlib import asynccontextmanager
+from typing import Any
 
 import uvicorn
 from a2a.server.apps import A2AStarletteApplication
@@ -50,8 +63,14 @@ from google.adk.sessions import InMemorySessionService
 from starlette.applications import Starlette
 from a2a.server.agent_execution.context import RequestContext
 
-from procu_forge_buyer.callbacks import _session_state_dict
 from procu_forge_vendor.agent import root_agent
+from procu_forge_vendor.state_keys import (
+    COMMUNICATION_KEY,
+    PRODUCT_KEY,
+    ROUND_KEY,
+    RFQ_ID_KEY,
+    VENDOR_ID_KEY,
+)
 
 load_dotenv()
 
@@ -72,62 +91,106 @@ _runner = Runner(
 )
 
 
-# ── custom request converter ──────────────────────────────────────────────────
+# ── message parsing helpers ───────────────────────────────────────────────────
 
-def _extract_rfq_id(request: RequestContext) -> str | None:
-    """Parse rfq_id from the first JSON text part of the A2A message."""
+def _parse_envelope(request: RequestContext) -> dict[str, Any] | None:
+    """Extract and JSON-parse the first text part of the A2A message."""
     if not (request.message and request.message.parts):
         return None
     for part in request.message.parts:
         try:
-            text = part.root.text
-            body = json.loads(text)
-            print("body", body)
-            rfq_id = body.get("rfq_id")
-            if rfq_id:
-                return str(rfq_id)
+            body = json.loads(part.root.text)
+            if isinstance(body, dict):
+                return body
         except (AttributeError, TypeError, json.JSONDecodeError, ValueError):
             continue
     return None
 
 
+def _initial_state_from_rfq(envelope: dict[str, Any]) -> dict[str, Any]:
+    """Build the canonical vendor state skeleton from an incoming RFQ envelope.
+
+    Only called when message_type == 'RFQ' and the session is brand-new.
+    The product.price / sku / unit fields are stubs — the quote agent's
+    get_vendor_product_details tool fills them in from the catalog on turn 1.
+    """
+    item: dict[str, Any] = (envelope.get("payload") or {}).get("item") or {}
+    return {
+        VENDOR_ID_KEY: envelope.get("vendor_id", ""),
+        RFQ_ID_KEY: envelope.get("rfq_id", ""),
+        ROUND_KEY: 0,
+        PRODUCT_KEY: {
+            "id": item.get("product_id") or item.get("id", ""),
+            "sku": item.get("sku", ""),
+            "currency": item.get("currency", "USD"),
+            "unit": item.get("unit", "unit"),
+            "price": float(item.get("unit_price") or 0),
+            "quantity": int(item.get("quantity") or 1),
+        },
+        COMMUNICATION_KEY: [envelope],   # seed with the RFQ itself
+    }
+
+
+# ── custom request converter ──────────────────────────────────────────────────
+
 def rfq_request_converter(
     request: RequestContext,
     part_converter: A2APartToGenAIPartConverter,
 ) -> AgentRunRequest:
-    """Map rfq_id from the message body to session_id for deterministic threading.
+    """Route each A2A turn to the vendor session identified by rfq_id.
 
-    When the buyer sends any procurement message (RFQ, counter-offer, accept,
-    walk-away), the envelope always contains ``rfq_id``.  Using that as the ADK
-    session_id means every turn of the same negotiation lands in the same vendor
-    session — giving the agent full conversation history — regardless of which
-    A2A ``context_id`` the buyer supplied.
+    Session routing:
+        session_id = rfq_id   (from message envelope)
+        user_id    = "vendor_<rfq_id>"
 
-    Falls back to the default converter (context_id → session_id) when rfq_id
-    cannot be extracted (e.g. non-JSON or missing field).
+    State seeding (first RFQ turn only):
+        state_delta is populated with the full vendor state skeleton so the
+        quote agent and callback have a complete starting point without needing
+        to re-parse the raw message.  Subsequent turns (counter, accept) carry
+        no state_delta — state is maintained by tools.
+
+    Falls back to the default context_id-based routing when rfq_id is absent.
     """
     base = convert_a2a_request_to_agent_run_request(request, part_converter)
+    envelope = _parse_envelope(request)
 
-    rfq_id = _extract_rfq_id(request)
-    print("rfq_id", rfq_id)
-    if not rfq_id:
-        _LOG.debug(
-            "rfq_request_converter: no rfq_id found, using default session_id=%s",
-            base.session_id,
-        )
+    if not envelope:
+        _LOG.debug("rfq_request_converter: no JSON envelope, using default routing")
         return base
 
-    _LOG.debug(
-        "rfq_request_converter: rfq_id=%s → session_id=%s (was %s)",
-        rfq_id,
-        rfq_id,
-        base.session_id,
-    )
+    rfq_id = envelope.get("rfq_id")
+    if not rfq_id:
+        _LOG.debug("rfq_request_converter: no rfq_id in envelope, using default routing")
+        return base
+
+    rfq_id = str(rfq_id)
+    message_type = str(envelope.get("message_type") or "")
+
+    # Seed state only on the opening RFQ so we don't overwrite tool-written state
+    # on counter-offer / accept turns.
+    state_delta: dict[str, Any] | None = None
+    if message_type == "RFQ":
+        state_delta = _initial_state_from_rfq(envelope)
+        _LOG.info(
+            "rfq_request_converter: RFQ seed  rfq_id=%s product_id=%s qty=%s",
+            rfq_id,
+            state_delta[PRODUCT_KEY].get("id"),
+            state_delta[PRODUCT_KEY].get("quantity"),
+        )
+    else:
+        _LOG.debug(
+            "rfq_request_converter: %s turn  rfq_id=%s session_id=%s",
+            message_type,
+            rfq_id,
+            rfq_id,
+        )
+
     return AgentRunRequest(
         user_id=f"vendor_{rfq_id}",
         session_id=rfq_id,
         new_message=base.new_message,
         run_config=base.run_config,
+        state_delta=state_delta,
     )
 
 

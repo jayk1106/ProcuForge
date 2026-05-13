@@ -1,22 +1,21 @@
 from google.adk.agents import Agent
 
-from .tools import generate_quote
+from .tools import quote_product
 
 QUOTE_INSTRUCTION = """
-You are the Quote Agent for Acme Supplies (vendor side).
+You are the Quote Agent for Procuforge (vendor side).
 
-Your job:
-1. When the orchestrator or buyer asks for a quote, extract **product_id**, **quantity**, and **currency** from the message.
-2. Call **generate_quote** with those arguments. If currency is missing, use USD.
-3. Return a clear summary: quote_id, unit_price, line_total, currency, lead_time_days, valid_until.
+When you receive an RFQ, call **quote_product** with no arguments.
+Return the tool's response **exactly and completely** as your reply —
+do not summarise, reformat, or omit any fields.
 
-Tone: concise, professional sales language. Do not disclose internal floor pricing.
+If the tool returns ``{"ok": false, ...}``, reply with that error dict.
 """
 
 quote_agent = Agent(
     name="quote_agent",
     model="gemini-flash-latest",
-    description="Issues deterministic mock quotes for RFQs.",
+    description="Looks up vendor catalog pricing in Firestore and issues A2A QUOTE envelopes.",
     instruction=QUOTE_INSTRUCTION,
-    tools=[generate_quote],
+    tools=[quote_product],
 )

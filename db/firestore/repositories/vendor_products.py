@@ -67,3 +67,21 @@ class VendorProductRepository:
             ]
 
         return await asyncio.to_thread(_op)
+
+    async def get_by_product_and_vendor(
+        self, product_id: str, vendor_id: str
+    ) -> VendorProduct | None:
+        def _op() -> VendorProduct | None:
+            query = (
+                self._collection.where(filter=FieldFilter("productId", "==", product_id))
+                .where(filter=FieldFilter("vendorId", "==", vendor_id))
+                .where(filter=FieldFilter("active", "==", True))
+                .limit(1)
+            )
+            results = list(query.stream())
+            if not results:
+                return None
+            s = results[0]
+            return VendorProduct.model_validate(snapshot_to_model_dict(s.id, s.to_dict()))
+
+        return await asyncio.to_thread(_op)

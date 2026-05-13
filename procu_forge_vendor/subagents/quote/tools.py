@@ -1,41 +1,106 @@
 from __future__ import annotations
 
-import uuid
 from typing import Any
 
-from procu_forge_vendor.pricing import (
-    lead_time_days,
-    quantity_tier_discount_fraction,
-    quoted_unit_price,
-    quote_valid_until,
-    stable_hash_int,
+from google.adk.tools.base_tool import ToolContext
+
+from communication import A2AMessageBuilder
+from communication.payload_builder import BUYER_AGENT, VENDOR_AGENT
+from db.firestore.client import get_firestore_client
+from db.firestore.repositories.vendor_products import VendorProductRepository
+from procu_forge_vendor.pricing import quote_valid_until
+from procu_forge_vendor.state_keys import (
+    COMMUNICATION_KEY,
+    PRODUCT_KEY,
+    ROUND_KEY,
+    RFQ_ID_KEY,
+    VENDOR_ID_KEY,
 )
 
 
-def generate_quote(product_id: str, quantity: int, currency: str = "USD") -> dict[str, Any]:
-    """Issue a deterministic mock quote for an RFQ.
+async def quote_product(tool_context: ToolContext) -> dict[str, Any]:
+    """Fetch vendor product details from Firestore and return a QUOTE envelope.
 
-    Args:
-        product_id: Catalog product identifier from the buyer RFQ.
-        quantity: Requested units.
-        currency: ISO currency code (default USD).
+    All inputs are read from session state seeded by the incoming RFQ:
+      - state["vendor_id"]         → which vendor to look up
+      - state["rfq_id"]            → envelope thread identifier
+      - state["product"]["id"]     → product to quote
+      - state["product"]["quantity"] → requested units
+      - state["product"]["currency"] → preferred currency (fallback to DB record)
 
-    Returns:
-        Quote payload with quote_id, unit_price, line_total, lead_time_days, etc.
+    Returns a complete A2A QUOTE envelope dict, or ``{"ok": False, "error": ...}``.
+    The agent must forward this payload verbatim as its response.
     """
-    unit = quoted_unit_price(product_id, quantity)
-    tier = quantity_tier_discount_fraction(quantity)
-    quote_id = str(uuid.uuid4())
-    return {
-        "quote_id": quote_id,
-        "product_id": product_id,
-        "quantity": quantity,
-        "currency": currency,
-        "unit_price": unit,
-        "line_total": round(unit * quantity, 2),
-        "quantity_tier_discount": tier,
-        "lead_time_days": lead_time_days(product_id),
-        "valid_until": quote_valid_until(),
-        "availability": "in_stock_mock",
-        "notes": f"Synthetic quote; hash_seed={stable_hash_int(product_id) % 10000}",
-    }
+    vendor_id: str = tool_context.state.get(VENDOR_ID_KEY) or ""
+    rfq_id: str = tool_context.state.get(RFQ_ID_KEY) or ""
+    product_state: dict[str, Any] = dict(tool_context.state.get(PRODUCT_KEY) or {})
+
+    if not vendor_id:
+        return {"ok": False, "error": "vendor_id not found in session state"}
+    if not rfq_id:
+        return {"ok": False, "error": "rfq_id not found in session state"}
+
+    product_id: str = product_state.get("id") or ""
+    quantity: int = int(product_state.get("quantity") or 1)
+    currency: str = product_state.get("currency") or "USD"
+
+    if not product_id:
+        return {"ok": False, "error": "product.id not found in session state"}
+
+    repo = VendorProductRepository(get_firestore_client())
+    vp = await repo.get_by_product_and_vendor(product_id, vendor_id)
+
+    if vp is None:
+        return {
+            "ok": False,
+            "error": (
+                f"No active vendor-product record found: "
+                f"product_id={product_id!r} vendor_id={vendor_id!r}"
+            ),
+        }
+
+    # ── write authoritative product block to state ────────────────────────────
+    resolved_currency = vp.pricing.currency or currency
+    product_state.update(
+        {
+            "id": product_id,
+            "sku": vp.vendor_sku,
+            "currency": resolved_currency,
+            "unit": vp.unit,
+            "listed_unit_price": vp.pricing.unit_price,
+            "quantity": quantity,
+            "lead_time_days": vp.lead_time_days,
+            "availability_status": vp.availability_status,
+            "minimum_order_qty": vp.pricing.minimum_order_qty,
+        }
+    )
+    tool_context.state[PRODUCT_KEY] = product_state
+
+    # ── build QUOTE envelope ──────────────────────────────────────────────────
+    unit_price = vp.pricing.unit_price * (1 - 0.05)  # 5% opening discount
+
+    builder = A2AMessageBuilder(
+        rfq_id=rfq_id,
+        vendor_id=vendor_id,
+        product_id=product_id,
+        sku=vp.vendor_sku,
+        quantity=quantity,
+        unit=vp.unit,
+        currency=resolved_currency,
+        from_agent=VENDOR_AGENT,
+        to_agent=BUYER_AGENT,
+    )
+
+    envelope = builder.get_quote_payload(
+        unit_price=unit_price,
+        negotiation_round=0,
+        valid_until=quote_valid_until(),
+    )
+
+    # ── record in communication log ───────────────────────────────────────────
+    comms = list(tool_context.state.get(COMMUNICATION_KEY) or [])
+    comms.append(envelope)
+    tool_context.state[COMMUNICATION_KEY] = comms
+    tool_context.state[ROUND_KEY] = 0
+
+    return envelope
