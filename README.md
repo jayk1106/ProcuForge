@@ -11,15 +11,17 @@ ADK-based procurement agents.
 
 The buyer negotiator talks to the vendor over **A2A**. Start the vendor API server from the repo root, then run the buyer. See **[docs/a2a_vendor_setup.md](docs/a2a_vendor_setup.md)**.
 
-Quick start:
+Quick start (custom runner with in-memory sessions):
 
 ```bash
-# Terminal 1 — vendor A2A endpoint
-uv run adk api_server --a2a --host 127.0.0.1 --port 8000 .
+# Terminal 1 — vendor A2A server (in-memory sessions)
+uv run uvicorn vendor_server:app --host 127.0.0.1 --port 8001
 
-# Terminal 2 — buyer (example)
+# Terminal 2 — buyer
 uv run python main.py
 ```
+
+See **[docs/a2a_vendor_setup.md](docs/a2a_vendor_setup.md)** for the legacy `adk api_server --a2a` approach and all configuration options.
 
 ## Setup
 

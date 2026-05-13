@@ -15,7 +15,7 @@ from procu_forge_buyer.state_keys import NEGOTIATION_CONFIG_KEY, VENDOR_OFFERS_K
 
 VENDOR_AGENT_CARD_URL = os.getenv(
     "VENDOR_A2A_AGENT_CARD_URL",
-    f"http://127.0.0.1:8001/a2a/procu_forge_vendor{AGENT_CARD_WELL_KNOWN_PATH}",
+    f"http://127.0.0.1:8001{AGENT_CARD_WELL_KNOWN_PATH}",
 )
 
 vendor_remote_agent = RemoteA2aAgent(
