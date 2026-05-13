@@ -24,7 +24,7 @@ from ...state_keys import PLANNER_PLAN_KEY
 
 logger = logging.getLogger(__name__)
 
-VENDOR_A2A_TOOL_NAME = "procu_forge_vendor"
+VENDOR_A2A_TOOL_NAME = "negotiate_with_vendor"
 _MAX_LOG_CHARS = 8_000
 
 
@@ -95,61 +95,13 @@ def negotiator_before_tool(
 ) -> dict[str, Any] | str | None:
     if tool.name != VENDOR_A2A_TOOL_NAME:
         return None
-    raw = args.get("request")
-    if not isinstance(raw, str):
-        err = f"procu_forge_vendor requires string `request` (JSON envelope), got {type(raw).__name__}"
-        logger.error("a2a_send_invalid type session_id=%s %s", tool_context.session.id, err)
-        return (
-            "[communication_schema_error] "
-            + err
-            + " Fix: pass a single JSON object string with schema_version, message_id, "
-            "rfq_id, vendor_id, from_agent, to_agent, message_type, timestamp, payload."
-        )
-    try:
-        msg = json.loads(raw)
-    except json.JSONDecodeError as e:
-        logger.error(
-            "a2a_send_invalid_json session_id=%s error=%s body=%s",
-            tool_context.session.id,
-            e,
-            _trunc(raw),
-        )
-        return (
-            "[communication_schema_error] `request` is not valid JSON: "
-            f"{e!s}. Body (truncated): {_trunc(raw)}"
-        )
-    if not isinstance(msg, dict):
-        logger.error(
-            "a2a_send_invalid_root session_id=%s type=%s",
-            tool_context.session.id,
-            type(msg).__name__,
-        )
-        return (
-            "[communication_schema_error] JSON root must be an object (envelope), "
-            f"not {type(msg).__name__}."
-        )
-    try:
-        validate_communication_message(msg)
-    except CommunicationSchemaError as e:
-        logger.error(
-            "a2a_send_schema_rejected session_id=%s %s errors=%s body=%s",
-            tool_context.session.id,
-            e,
-            e.errors,
-            _trunc(raw),
-        )
-        detail = "; ".join(e.errors[:12])
-        if len(e.errors) > 12:
-            detail += f"; ... ({len(e.errors) - 12} more)"
-        return (
-            "[communication_schema_error] Outbound message failed validation: "
-            f"{e!s}. Details: {detail}"
-        )
+    data = args.get("communication_data") or {}
     logger.info(
-        "a2a_send session_id=%s tool=%s %s",
+        "a2a_call_begin session_id=%s vendor_id=%s message_type=%s price=%s",
         tool_context.session.id,
-        tool.name,
-        _envelope_teaser(msg),
+        data.get("vendor_id"),
+        data.get("message_type"),
+        data.get("price"),
     )
     return None
 
@@ -162,52 +114,44 @@ def negotiator_after_tool(
 ) -> dict[str, Any] | str | None:
     if tool.name != VENDOR_A2A_TOOL_NAME:
         return None
-    if isinstance(tool_response, dict):
-        text = json.dumps(tool_response, default=str, ensure_ascii=False)
-    elif tool_response is None:
-        text = ""
-    else:
-        text = str(tool_response)
+
+    if not isinstance(tool_response, dict):
+        logger.warning(
+            "a2a_call_end session_id=%s unexpected response type=%s",
+            tool_context.session.id,
+            type(tool_response).__name__,
+        )
+        return None
+
+    # The last entry in communications is the raw vendor reply text.
+    comms = tool_response.get("communications") or []
+    vendor_reply = comms[-1] if comms else ""
+    rfq_id = tool_response.get("rfq_id", "?")
+    round_num = tool_response.get("round", "?")
+
+    # Try to validate the vendor reply if it looks like a JSON envelope.
+    reply_str = vendor_reply if isinstance(vendor_reply, str) else json.dumps(vendor_reply, default=str)
+    stripped = reply_str.strip()
+    validation_note = ""
+    if stripped.startswith("{"):
+        try:
+            inbound = json.loads(stripped)
+            if isinstance(inbound, dict):
+                try:
+                    validate_communication_message(inbound)
+                    validation_note = " schema=ok"
+                except CommunicationSchemaError as e:
+                    validation_note = f" schema=mismatch({e.errors[:3]})"
+        except json.JSONDecodeError:
+            pass
+
     logger.info(
-        "a2a_receive session_id=%s tool=%s chars=%d body=%s",
+        "a2a_call_end session_id=%s rfq_id=%s round=%s vendor_reply_chars=%d%s",
         tool_context.session.id,
-        tool.name,
-        len(text),
-        _trunc(text),
-    )
-    stripped = text.strip()
-    if not stripped.startswith("{"):
-        logger.warning(
-            "a2a_receive_non_json session_id=%s tool=%s (no schema validation)",
-            tool_context.session.id,
-            tool.name,
-        )
-        return None
-    try:
-        inbound = json.loads(stripped)
-    except json.JSONDecodeError as e:
-        logger.warning(
-            "a2a_receive_json_parse_failed session_id=%s error=%s",
-            tool_context.session.id,
-            e,
-        )
-        return None
-    if not isinstance(inbound, dict):
-        return None
-    try:
-        validate_communication_message(inbound)
-    except CommunicationSchemaError as e:
-        logger.warning(
-            "a2a_receive_schema_mismatch session_id=%s %s errors=%s",
-            tool_context.session.id,
-            e,
-            e.errors,
-        )
-        return None
-    logger.info(
-        "a2a_receive_validated session_id=%s %s",
-        tool_context.session.id,
-        _envelope_teaser(inbound),
+        rfq_id,
+        round_num,
+        len(reply_str),
+        validation_note,
     )
     return None
 
