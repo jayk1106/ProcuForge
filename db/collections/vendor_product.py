@@ -19,6 +19,7 @@ class VendorProduct(FirestoreBaseModel):
     vendor_id: str = Field(alias="vendorId")
     product_id: str = Field(alias="productId")
     vendor_sku: str = Field(alias="vendorSku")
+    unit: str
     pricing: VendorProductPricing
     lead_time_days: int = Field(alias="leadTimeDays")
     contracted: bool

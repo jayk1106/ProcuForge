@@ -20,6 +20,7 @@ def _offers_from_rows(items: list[VendorProduct]) -> list[VendorOffer]:
             vendor_id=item.vendor_id,
             product_id=item.product_id,
             vendor_sku=item.vendor_sku,
+            unit=item.unit,
             unit_price=item.pricing.unit_price,
             currency=item.pricing.currency,
             lead_time_days=item.lead_time_days,

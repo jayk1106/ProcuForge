@@ -55,6 +55,11 @@ Authoritative lifecycle: **docs/request_status.md**.
 - **READY_FOR_PAYMENT** — Do not delegate; human gate.
 - **COMPLETED**, **CANCELLED**, **ESCALATED** — Do not delegate; terminal or handled via **pr_status**.
 
+CONTEXT:
+<pr_status>{pr_status}</pr_status>
+<request>{request}</request>
+
+
 If **pr_status** is missing, treat as **INITIATED** and apply the **INITIATED** row.
 If **pr_status** is an unknown value but **vendor_offers** has **offers**: **transfer_to_agent**
 ``negotiator_agent`` (never **vendor_search_agent** unless you are certain you are in **INITIATED**

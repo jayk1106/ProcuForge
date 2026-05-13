@@ -4,6 +4,8 @@ Import dev seed JSON under data/dev/ into Firestore.
 
 Behavior:
 - Default: create documents; if a document already exists, it is skipped and import continues.
+  **New fields in seed JSON (e.g. `unit` on vendor products) are not applied** until you use
+  `--upsert` or delete the docs and re-import.
 - Optional: --upsert to set(merge=True) for every doc (idempotent overwrite/merge).
 
 Run:

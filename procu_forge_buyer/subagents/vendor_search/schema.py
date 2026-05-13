@@ -14,6 +14,7 @@ class VendorOffer(BaseModel):
     vendor_id: str = Field(alias="vendorId")
     product_id: str = Field(alias="productId")
     vendor_sku: str = Field(alias="vendorSku")
+    unit: str = Field(description="Sell unit for unit_price (e.g. piece, kg, liter, hour).")
     unit_price: float = Field(alias="unitPrice")
     currency: str
     lead_time_days: int = Field(alias="leadTimeDays")

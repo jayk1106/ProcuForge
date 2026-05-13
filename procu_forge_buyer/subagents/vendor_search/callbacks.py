@@ -68,12 +68,14 @@ def _offers_detail_block(st: dict[str, Any]) -> str:
         vendor_id = o.get("vendorId", o.get("vendor_id"))
         unit_price = o.get("unitPrice", o.get("unit_price"))
         currency = o.get("currency")
+        sell_unit = o.get("unit") or ""
         lead = o.get("leadTimeDays", o.get("lead_time_days"))
         availability = o.get("availabilityStatus", o.get("availability_status"))
         contracted = o.get("contracted")
         tail = " contracted" if contracted else ""
+        per = f" per {sell_unit}" if sell_unit else ""
         lines.append(
-            f"- vendorId={vendor_id} price={unit_price} {currency} lead={lead} availability={availability}{tail}"
+            f"- vendorId={vendor_id} price={unit_price} {currency}{per} lead={lead} availability={availability}{tail}"
         )
     if len(offers) > 10:
         lines.append(f"... ({len(offers) - 10} more)")

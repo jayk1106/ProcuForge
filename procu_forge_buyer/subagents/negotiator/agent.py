@@ -12,21 +12,22 @@ from .callbacks import (
     negotiator_after_tool,
     negotiator_before_tool,
 )
+from .tools import negotiate_with_vendor
 
 load_dotenv()
 
-VENDOR_AGENT_CARD_URL = os.getenv(
-    "VENDOR_A2A_AGENT_CARD_URL",
-    f"http://127.0.0.1:8001/a2a/procu_forge_vendor{AGENT_CARD_WELL_KNOWN_PATH}",
-)
+# VENDOR_AGENT_CARD_URL = os.getenv(
+#     "VENDOR_A2A_AGENT_CARD_URL",
+#     f"http://127.0.0.1:8001/a2a/procu_forge_vendor{AGENT_CARD_WELL_KNOWN_PATH}",
+# )
 
-vendor_remote_agent = RemoteA2aAgent(
-    name="procu_forge_vendor",
-    description="External vendor agent reachable over A2A; issues quotes and negotiates.",
-    agent_card=VENDOR_AGENT_CARD_URL,
-)
+# vendor_remote_agent = RemoteA2aAgent(
+#     name="procu_forge_vendor",
+#     description="External vendor agent reachable over A2A; issues quotes and negotiates.",
+#     agent_card=VENDOR_AGENT_CARD_URL,
+# )
 
-vendor_remote_agent_tool = AgentTool(agent=vendor_remote_agent)
+# vendor_remote_agent_tool = AgentTool(agent=vendor_remote_agent)
 
 NEGOTIATOR_INSTRUCTION_SUFFIX = """
 
@@ -34,7 +35,19 @@ NEGOTIATOR_INSTRUCTION_SUFFIX = """
 
 ## Session state (payload construction)
 
-Session **request** holds `product_id`, `quantity`, `currency`, `required_by_date`, `budget_ceiling`, `urgency`, `delivery`, `buyer_notes`. Prefer these when filling envelope **payload** fields; do not invent catalog data.
+Session **request** holds `product_id`, `quantity`, `currency`, `required_by_date`, `budget_ceiling`, `urgency`, `delivery`, `buyer_notes`. Prefer these when reasoning about targets and deadlines. The **negotiate_with_vendor** tool sets RFQ line **`item.quantity`** from **`request.quantity`** and catalog fields from the matching **vendor_offers** row for each **`vendor_id`**.
+
+### Tool: **negotiate_with_vendor** (exactly one vendor per call)
+
+- Call the tool **once per vendor** you are actively negotiating in this phase. Use each offer’s **`vendorId`** string as **`vendor_id`** (must match a row in **vendor_offers.offers**).
+- Start each vendor with **`message_type`**: **`RFQ`**, then follow `skill.md` for **`COUNTER_OFFER`**, **`ACCEPT`**, and **`WALKAWAY`**. Schema enum values use **`ACCEPT`** (not alternate labels).
+- **`price`**: required for **`COUNTER_OFFER`** and **`ACCEPT`** (unit price). For **`WALKAWAY`**, optional numeric **`last_offer`** when you pass **`price`**.
+- **`walkaway_reason`**: required for **`WALKAWAY`** — use a **`walkaway_reason`** value from `a2a_enums.md` (for example **`MAX_ROUNDS_REACHED`**).
+
+CONTEXT:
+<vendor_offers>{vendor_offers}</vendor_offers>
+
+If **vendor_offers.offers** includes **`vendor_ids`** (array) or a single **`vendor_id`** / **`vendor`**, only negotiate those vendor ids
 
 After negotiation completes, record a concise outcome in the conversation (quote identifiers, agreed prices, lead times, vendor confirmation references when present) and stop. The workflow loop will advance **pr_status**.
 """
@@ -48,7 +61,7 @@ negotiator_agent = Agent(
     model="gemini-flash-latest",
     description="Negotiates quotes with external vendors over the A2A protocol.",
     instruction=NEGOTIATOR_INSTRUCTION,
-    tools=[vendor_remote_agent_tool],
+    tools=[negotiate_with_vendor],
     before_agent_callback=log_negotiator_before_agent,
     after_agent_callback=negotiator_after_agent_with_transition,
     before_tool_callback=negotiator_before_tool,
