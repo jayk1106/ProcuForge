@@ -5,3 +5,8 @@ RFQ_ID_KEY = "rfq_id"
 ROUND_KEY = "round"
 PRODUCT_KEY = "product"
 COMMUNICATION_KEY = "communication"
+
+# Negotiation price tracking
+LAST_SELLING_PRICE_KEY = "last_selling_price"
+LATEST_BUYER_PRICE_KEY = "latest_buyer_price"
+LATEST_OFFER_PRICE_KEY = "latest_offer_price"

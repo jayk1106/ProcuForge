@@ -118,10 +118,10 @@ class A2AMessageBuilder:
     ) -> dict[str, Any]:
         def_required_by, def_deadline = self._deadline_defaults()
         item = {**self._base_item()}
-        if message_type != MessageType.WALKAWAY:
+        if message_type == MessageType.COUNTER_OFFER:
             item["last_unit_price_offer"] = unit_price
             item["last_total_price_offer"] = _r2(unit_price * self.quantity)
-        else:
+        else:  # ACCEPT, WALKAWAY — final price, not a counter
             item["unit_price"] = unit_price
             item["total_price"] = _r2(unit_price * self.quantity)
 
@@ -222,20 +222,15 @@ class A2AMessageBuilder:
         unit_price: float,
         negotiation_round: int,
         *,
-        accepted: bool = False,
         best_and_final: bool = False,
-        message: str | None = None,
     ) -> dict[str, Any]:
         """Vendor's response to a buyer counter-offer."""
         item: dict[str, Any] = {
             **self._base_item(),
             "unit_price": _r2(unit_price),
             "total_price": _r2(unit_price * self.quantity),
-            "accepted": accepted,
-            "best_and_final": best_and_final,
+            "is_final": best_and_final,
         }
-        if message:
-            item["message"] = message
 
         return self._envelope(
             MessageType.COUNTER_RESPONSE,

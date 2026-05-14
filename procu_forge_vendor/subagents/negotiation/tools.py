@@ -1,120 +1,79 @@
 from __future__ import annotations
 
-import uuid
-from typing import Any
+from typing import Any, Literal
 
 from google.adk.tools.base_tool import ToolContext
 
 from communication import A2AMessageBuilder
 from communication.payload_builder import BUYER_AGENT, VENDOR_AGENT
-from procu_forge_vendor.pricing import quote_valid_until
 from procu_forge_vendor.state_keys import (
     COMMUNICATION_KEY,
+    LAST_SELLING_PRICE_KEY,
+    LATEST_BUYER_PRICE_KEY,
+    LATEST_OFFER_PRICE_KEY,
     PRODUCT_KEY,
     RFQ_ID_KEY,
     ROUND_KEY,
     VENDOR_ID_KEY,
 )
 
+_MAX_ROUNDS = 3
 
-def evaluate_counter_offer(
-    proposed_unit_price: float,
-    *,
-    tool_context: ToolContext,
-) -> dict[str, Any]:
-    """Evaluate a buyer counter-offer and return the vendor's pricing decision.
 
-    Reads product details and round from session state. Returns a decision dict
-    the LLM should review before calling send_counter_response.
+def get_negotiation_context(tool_context: ToolContext) -> dict[str, Any]:
+    """Return pricing context the LLM needs to decide how to respond to the buyer.
 
-    Args:
-        proposed_unit_price: Buyer's offered unit price.
-
-    Returns:
-        Decision dict with accepted, counter_offer_unit_price or agreed_unit_price,
-        best_and_final, message, and negotiation_round.
+    Fetches (or computes and caches) last_selling_price from state.
+    Returns all price anchors, the current round, and both sides' latest offers
+    so the LLM can make an informed accept / counter / walkaway decision.
     """
-    product = tool_context.state.get(PRODUCT_KEY) or {}
-    currency = product.get("currency") or "USD"
-    product_id = product.get("id") or "UNKNOWN"
-    quantity = int(product.get("quantity") or 1)
+    product_state = dict(tool_context.state.get(PRODUCT_KEY) or {})
+    listed_unit_price = float(product_state.get("listed_unit_price") or 0)
 
-    catalog_price = float(product.get("listed_unit_price") or 0)
-    if catalog_price <= 0:
+    if listed_unit_price <= 0:
         return {
             "ok": False,
-            "error": (
-                "listed_unit_price is 0 in session state — "
-                "ensure lookup_product was called on the opening RFQ turn."
-            ),
+            "error": "listed_unit_price is 0 in state — ensure the quote agent ran first.",
         }
 
-    floor = round(catalog_price * 0.88, 2)
-    # Vendor ask defaults to last quoted price; for round 0 that is the opening quote.
-    opening_quote_price = round(catalog_price * 0.95, 2)
-    negotiation_round = int(tool_context.state.get(ROUND_KEY) or 0)
+    last_selling_price = tool_context.state.get(LAST_SELLING_PRICE_KEY)
+    if last_selling_price is None:
+        last_selling_price = round(listed_unit_price * 0.90, 2)
+        tool_context.state[LAST_SELLING_PRICE_KEY] = last_selling_price
 
-    if proposed_unit_price >= floor:
-        return {
-            "ok": True,
-            "accepted": True,
-            "agreed_unit_price": round(min(proposed_unit_price, opening_quote_price), 2),
-            "currency": currency,
-            "product_id": product_id,
-            "quantity": quantity,
-            "negotiation_round": negotiation_round,
-            "message": "We can accept your proposal. Please confirm to finalise.",
-            "best_and_final": False,
-        }
-
-    if negotiation_round >= 2:
-        return {
-            "ok": True,
-            "accepted": False,
-            "counter_offer_unit_price": floor,
-            "currency": currency,
-            "product_id": product_id,
-            "quantity": quantity,
-            "negotiation_round": negotiation_round,
-            "message": "This is our best and final offer on this line item.",
-            "best_and_final": True,
-        }
-
-    midpoint = round((proposed_unit_price + opening_quote_price) / 2.0, 2)
-    counter = max(min(midpoint, opening_quote_price), floor)
     return {
         "ok": True,
-        "accepted": False,
-        "counter_offer_unit_price": counter,
-        "currency": currency,
-        "product_id": product_id,
-        "quantity": quantity,
-        "negotiation_round": negotiation_round,
-        "message": "We appreciate the proposal. We can move to the counter shown.",
-        "best_and_final": False,
+        "last_selling_price": last_selling_price,
+        "listed_unit_price": listed_unit_price,
+        "currency": product_state.get("currency") or "USD",
+        "negotiation_round": int(tool_context.state.get(ROUND_KEY) or 0),
+        "max_rounds": _MAX_ROUNDS,
+        "latest_offer_price": tool_context.state.get(LATEST_OFFER_PRICE_KEY),
+        "latest_buyer_price": tool_context.state.get(LATEST_BUYER_PRICE_KEY),
     }
 
 
-def send_counter_response(
-    unit_price: float,
-    accepted: bool,
+def send_response(
+    response_type: Literal["ACCEPT", "COUNTER_RESPONSE", "WALKAWAY"],
     *,
+    vendor_unit_price: float | None = None,
+    buyer_proposed_price: float | None = None,
     best_and_final: bool = False,
-    message: str | None = None,
+    walkaway_reason: str = "MAX_ROUNDS_REACHED",
     tool_context: ToolContext,
 ) -> dict[str, Any]:
-    """Build a COUNTER_RESPONSE envelope and record it in the communication log.
-
-    Must be called after evaluate_counter_offer with the price the LLM decided to send.
+    """Build the A2A envelope for the response type the LLM has chosen and record it.
 
     Args:
-        unit_price: The unit price to send in the response.
-        accepted: Whether the vendor is accepting the buyer's proposed price.
-        best_and_final: Whether this is the vendor's final offer.
-        message: Optional explanatory message.
+        response_type: One of "ACCEPT", "COUNTER_RESPONSE", or "WALKAWAY".
+        vendor_unit_price: Required for ACCEPT and COUNTER_RESPONSE — the price
+            the vendor is offering or agreeing to.
+        buyer_proposed_price: The price the buyer proposed this round (records
+            in state as latest_buyer_price when provided).
+        best_and_final: Mark this counter as the vendor's final offer.
+        walkaway_reason: Human-readable reason string for WALKAWAY envelopes.
 
-    Returns the complete A2A COUNTER_RESPONSE envelope dict.
-    Return this response exactly and completely as your reply.
+    Returns the complete A2A envelope dict — return it exactly as your reply.
     """
     vendor_id: str = tool_context.state.get(VENDOR_ID_KEY) or ""
     rfq_id: str = tool_context.state.get(RFQ_ID_KEY) or ""
@@ -127,7 +86,10 @@ def send_counter_response(
 
     product_id: str = product_state.get("id") or ""
     if not product_id:
-        return {"ok": False, "error": "product.id missing — call evaluate_counter_offer first"}
+        return {"ok": False, "error": "product.id missing — ensure quote agent ran first"}
+
+    if response_type in ("ACCEPT", "COUNTER_RESPONSE") and vendor_unit_price is None:
+        return {"ok": False, "error": f"vendor_unit_price is required for {response_type}"}
 
     negotiation_round = int(tool_context.state.get(ROUND_KEY) or 0)
 
@@ -143,60 +105,36 @@ def send_counter_response(
         to_agent=BUYER_AGENT,
     )
 
-    envelope = builder.get_counter_response_payload(
-        unit_price=unit_price,
-        negotiation_round=negotiation_round,
-        accepted=accepted,
-        best_and_final=best_and_final,
-        message=message,
-    )
+    if response_type == "ACCEPT":
+        envelope = builder.get_accept_payload(
+            unit_price=vendor_unit_price,
+            negotiation_round=negotiation_round,
+        )
+    elif response_type == "COUNTER_RESPONSE":
+        envelope = builder.get_counter_response_payload(
+            unit_price=vendor_unit_price,
+            negotiation_round=negotiation_round,
+            best_and_final=best_and_final,
+        )
+    elif response_type == "WALKAWAY":
+        latest_offer = tool_context.state.get(LATEST_OFFER_PRICE_KEY)
+        envelope = builder.get_walkaway_payload(
+            walkaway_reason=walkaway_reason,
+            negotiation_round=negotiation_round,
+            last_unit_price=latest_offer,
+        )
+    else:
+        return {"ok": False, "error": f"unknown response_type: {response_type!r}"}
 
-    new_round = negotiation_round + 1
-    tool_context.state[ROUND_KEY] = new_round
+    if buyer_proposed_price is not None:
+        tool_context.state[LATEST_BUYER_PRICE_KEY] = buyer_proposed_price
+    if vendor_unit_price is not None:
+        tool_context.state[LATEST_OFFER_PRICE_KEY] = vendor_unit_price
+
+    tool_context.state[ROUND_KEY] = negotiation_round + 1
 
     comms = list(tool_context.state.get(COMMUNICATION_KEY) or [])
     comms.append(envelope)
     tool_context.state[COMMUNICATION_KEY] = comms
 
     return envelope
-
-
-def send_accept_confirmation(
-    agreed_unit_price: float,
-    *,
-    tool_context: ToolContext,
-) -> dict[str, Any]:
-    """Issue a vendor confirmation when both sides have agreed on a price.
-
-    Args:
-        agreed_unit_price: The final agreed unit price.
-
-    Returns a confirmation payload with vendor_confirmation_id and totals.
-    Record this response in the communication log and return it verbatim.
-    """
-    vendor_id: str = tool_context.state.get(VENDOR_ID_KEY) or ""
-    rfq_id: str = tool_context.state.get(RFQ_ID_KEY) or ""
-    product_state: dict[str, Any] = dict(tool_context.state.get(PRODUCT_KEY) or {})
-    quantity = int(product_state.get("quantity") or 1)
-    currency = product_state.get("currency") or "USD"
-
-    confirmation_id = str(uuid.uuid4())
-    line_total = round(agreed_unit_price * quantity, 2)
-
-    result = {
-        "vendor_confirmation_id": confirmation_id,
-        "rfq_id": rfq_id,
-        "vendor_id": vendor_id,
-        "agreed_unit_price": agreed_unit_price,
-        "quantity": quantity,
-        "currency": currency,
-        "line_total": line_total,
-        "status": "confirmed",
-        "message": "Offer accepted. Confirmation reference issued.",
-    }
-
-    comms = list(tool_context.state.get(COMMUNICATION_KEY) or [])
-    comms.append({"type": "ACCEPT_CONFIRMATION", "payload": result})
-    tool_context.state[COMMUNICATION_KEY] = comms
-
-    return result
