@@ -14,6 +14,7 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "uvicorn[standard]>=0.40.0",
     "vertexai>=1.43.0",
+    "adk-database-memory[sqlite]>=0.1.0",
 ]
 
 [tool.agents-cli]

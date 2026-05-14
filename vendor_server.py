@@ -18,8 +18,8 @@ complete skeleton from turn 1:
         "communication": [ <RFQ envelope> ]
     }
 
-Sessions are stored in-process (InMemorySessionService) — state does not
-survive a server restart.  Suitable for local development and testing.
+Sessions are stored in a local SQLite file via DatabaseSessionService, so
+state survives server restarts (suitable for local development / testing).
 
 Run:
     uv run uvicorn vendor_server:app --host 127.0.0.1 --port 8001
@@ -30,6 +30,8 @@ Or as a script:
 Environment overrides:
     VENDOR_SERVER_HOST  (default: 127.0.0.1)
     VENDOR_SERVER_PORT  (default: 8001)
+    VENDOR_SESSION_DB_URL   (full SQLAlchemy URL, optional)
+    VENDOR_SESSION_DB_PATH  (sqlite file path, default: ./data/vendor_sessions.db)
 """
 
 from __future__ import annotations
@@ -38,6 +40,7 @@ import json
 import logging
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 import uvicorn
@@ -59,7 +62,7 @@ from google.adk.auth.credential_service.in_memory_credential_service import (
 )
 from google.adk.memory.in_memory_memory_service import InMemoryMemoryService
 from google.adk.runners import Runner
-from google.adk.sessions import InMemorySessionService
+from google.adk.sessions import DatabaseSessionService
 from starlette.applications import Starlette
 from a2a.server.agent_execution.context import RequestContext
 
@@ -79,13 +82,27 @@ _LOG = logging.getLogger(__name__)
 _HOST = os.getenv("VENDOR_SERVER_HOST", "127.0.0.1")
 _PORT = int(os.getenv("VENDOR_SERVER_PORT", "8001"))
 
+
+def _build_session_service() -> DatabaseSessionService:
+    """Create a DB-backed ADK session service (local sqlite by default)."""
+    db_url = os.getenv("VENDOR_SESSION_DB_URL", "").strip()
+
+    if not db_url:
+        db_path_raw = os.getenv("VENDOR_SESSION_DB_PATH", "./data/vendor_sessions.db")
+        db_path = Path(db_path_raw).expanduser().resolve()
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        db_url = f"sqlite+aiosqlite:///{db_path}"
+
+    _LOG.info("vendor session storage configured  db_url=%s", db_url)
+    return DatabaseSessionService(db_url=db_url)
+
 # ── shared runner ─────────────────────────────────────────────────────────────
 
 _runner = Runner(
     app_name=root_agent.name,
     agent=root_agent,
     artifact_service=InMemoryArtifactService(),
-    session_service=InMemorySessionService(),
+    session_service=_build_session_service(),
     memory_service=InMemoryMemoryService(),
     credential_service=InMemoryCredentialService(),
 )
