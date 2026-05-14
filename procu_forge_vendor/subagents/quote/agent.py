@@ -2,6 +2,8 @@ from google.adk.agents import Agent
 
 from .tools import quote_product
 
+from .callback import after_agent_callback
+
 QUOTE_INSTRUCTION = """
 You are the Quote Agent for Procuforge (vendor side).
 
@@ -18,4 +20,5 @@ quote_agent = Agent(
     description="Looks up vendor catalog pricing in Firestore and issues A2A QUOTE envelopes.",
     instruction=QUOTE_INSTRUCTION,
     tools=[quote_product],
+    after_agent_callback=after_agent_callback,
 )

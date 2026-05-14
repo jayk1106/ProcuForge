@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from uuid import uuid4
 
@@ -17,6 +18,7 @@ from google.adk.agents.remote_a2a_agent import AGENT_CARD_WELL_KNOWN_PATH
 from api.schemas.common import EchoRequest, EchoResponse, PingResponse
 
 router = APIRouter(prefix="/test", tags=["test"])
+logger = logging.getLogger(__name__)
 
 VENDOR_AGENT_CARD_URL = os.getenv(
     "VENDOR_A2A_AGENT_CARD_URL",
@@ -25,6 +27,14 @@ VENDOR_AGENT_CARD_URL = os.getenv(
 
 _httpx_client: httpx.AsyncClient | None = None
 _a2a_client: A2AClient | None = None
+
+
+def _extract_part_text(part: object) -> str | None:
+    root = getattr(part, "root", None)
+    text = getattr(root, "text", None) or getattr(part, "text", None)
+    if isinstance(text, str) and text:
+        return text
+    return None
 
 
 async def _get_vendor_a2a_client() -> A2AClient:
@@ -67,16 +77,19 @@ async def _call_vendor(message_json: str, context_id: str) -> str:
             task, update = event
             if isinstance(update, TaskArtifactUpdateEvent):
                 for part in update.artifact.parts:
-                    if hasattr(part, "root") and hasattr(part.root, "text"):
-                        last_text = part.root.text
+                    text = _extract_part_text(part)
+                    if text:
+                        last_text = text
             elif update is None and task and task.status and task.status.message:
                 for part in task.status.message.parts:
-                    if hasattr(part, "root") and hasattr(part.root, "text"):
-                        last_text = part.root.text
+                    text = _extract_part_text(part)
+                    if text:
+                        last_text = text
         elif isinstance(event, Message):
             for part in event.parts:
-                if hasattr(part, "root") and hasattr(part.root, "text"):
-                    last_text = part.root.text
+                text = _extract_part_text(part)
+                if text:
+                    last_text = text
 
     return last_text
 
@@ -112,6 +125,12 @@ async def trigger_vendor(envelope: dict) -> dict:
     Request body is the exact JSON envelope sent as A2A message text.
     """
     context_id = str(envelope.get("rfq_id") or uuid4())
+    logger.info(
+        "vendor_trigger request context_id=%s message_type=%s rfq_id=%s",
+        context_id,
+        envelope.get("message_type"),
+        envelope.get("rfq_id"),
+    )
 
     try:
         raw_reply = await _call_vendor(
@@ -132,6 +151,15 @@ async def trigger_vendor(envelope: dict) -> dict:
                 parsed_reply = maybe
         except json.JSONDecodeError:
             parsed_reply = None
+    else:
+        logger.warning("vendor_trigger empty_reply context_id=%s", context_id)
+
+    logger.info(
+        "vendor_trigger reply context_id=%s raw_reply=%r parsed=%s",
+        context_id,
+        raw_reply,
+        parsed_reply is not None,
+    )
 
     return {
         "context_id": context_id,

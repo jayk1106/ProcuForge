@@ -67,13 +67,6 @@ from starlette.applications import Starlette
 from a2a.server.agent_execution.context import RequestContext
 
 from procu_forge_vendor.agent import root_agent
-from procu_forge_vendor.state_keys import (
-    COMMUNICATION_KEY,
-    PRODUCT_KEY,
-    ROUND_KEY,
-    RFQ_ID_KEY,
-    VENDOR_ID_KEY,
-)
 
 load_dotenv()
 
@@ -124,30 +117,6 @@ def _parse_envelope(request: RequestContext) -> dict[str, Any] | None:
     return None
 
 
-def _initial_state_from_rfq(envelope: dict[str, Any]) -> dict[str, Any]:
-    """Build the canonical vendor state skeleton from an incoming RFQ envelope.
-
-    Only called when message_type == 'RFQ' and the session is brand-new.
-    The product.price / sku / unit fields are stubs — the quote agent's
-    get_vendor_product_details tool fills them in from the catalog on turn 1.
-    """
-    item: dict[str, Any] = (envelope.get("payload") or {}).get("item") or {}
-    return {
-        VENDOR_ID_KEY: envelope.get("vendor_id", ""),
-        RFQ_ID_KEY: envelope.get("rfq_id", ""),
-        ROUND_KEY: 0,
-        PRODUCT_KEY: {
-            "id": item.get("product_id") or item.get("id", ""),
-            "sku": item.get("sku", ""),
-            "currency": item.get("currency", "USD"),
-            "unit": item.get("unit", "unit"),
-            "price": float(item.get("unit_price") or 0),
-            "quantity": int(item.get("quantity") or 1),
-        },
-        COMMUNICATION_KEY: [envelope],   # seed with the RFQ itself
-    }
-
-
 # ── custom request converter ──────────────────────────────────────────────────
 
 def rfq_request_converter(
@@ -171,39 +140,29 @@ def rfq_request_converter(
     base = convert_a2a_request_to_agent_run_request(request, part_converter)
     envelope = _parse_envelope(request)
 
+    state_delta: dict[str, Any] = {}
+
     if not envelope:
         _LOG.debug("rfq_request_converter: no JSON envelope, using default routing")
-        return base
+        state_delta = {
+            "type": "error",
+            "message": "Validation failed",
+        }
 
     rfq_id = envelope.get("rfq_id")
-    if not rfq_id:
+    vendor_id = envelope.get("vendor_id")
+    message_type = envelope.get("message_type")
+    if not rfq_id or not vendor_id or not message_type:
         _LOG.debug("rfq_request_converter: no rfq_id in envelope, using default routing")
-        return base
+        state_delta = {
+            "type": "error",
+            "message": "Validation failed",
+        }
 
-    rfq_id = str(rfq_id)
-    message_type = str(envelope.get("message_type") or "")
-
-    # Seed state only on the opening RFQ so we don't overwrite tool-written state
-    # on counter-offer / accept turns.
-    state_delta: dict[str, Any] | None = None
-    if message_type == "RFQ":
-        state_delta = _initial_state_from_rfq(envelope)
-        _LOG.info(
-            "rfq_request_converter: RFQ seed  rfq_id=%s product_id=%s qty=%s",
-            rfq_id,
-            state_delta[PRODUCT_KEY].get("id"),
-            state_delta[PRODUCT_KEY].get("quantity"),
-        )
-    else:
-        _LOG.debug(
-            "rfq_request_converter: %s turn  rfq_id=%s session_id=%s",
-            message_type,
-            rfq_id,
-            rfq_id,
-        )
+    state_delta["temp:request_body"] = envelope
 
     return AgentRunRequest(
-        user_id=f"vendor_{rfq_id}",
+        user_id=vendor_id,
         session_id=rfq_id,
         new_message=base.new_message,
         run_config=base.run_config,

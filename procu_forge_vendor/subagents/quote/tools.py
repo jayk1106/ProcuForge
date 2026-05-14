@@ -98,9 +98,10 @@ async def quote_product(tool_context: ToolContext) -> dict[str, Any]:
     )
 
     # ── record in communication log ───────────────────────────────────────────
-    comms = list(tool_context.state.get(COMMUNICATION_KEY) or [])
-    comms.append(envelope)
-    tool_context.state[COMMUNICATION_KEY] = comms
-    tool_context.state[ROUND_KEY] = 0
+    # comms = list(tool_context.state.get(COMMUNICATION_KEY) or [])
+    # comms.append(envelope)
+    # tool_context.state[COMMUNICATION_KEY] = comms
+    # tool_context.state[ROUND_KEY] = 0
+    tool_context.state["temp:response_body"] = envelope
 
     return envelope

@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 from google.adk.agents import Agent
 
-from procu_forge_vendor.callbacks import log_vendor_before_agent
+from procu_forge_vendor.callbacks import before_agent_callback
 from procu_forge_vendor.logging_config import configure_vendor_logging
 from procu_forge_vendor.subagents.negotiation import negotiation_agent
 from procu_forge_vendor.subagents.quote import quote_agent
@@ -37,7 +37,7 @@ root_agent = Agent(
     instruction=ORCHESTRATOR_INSTRUCTION,
     model="gemini-flash-latest",
     sub_agents=[quote_agent, negotiation_agent],
-    before_agent_callback=log_vendor_before_agent,
+    before_agent_callback=before_agent_callback,
 )
 
 configure_vendor_logging()

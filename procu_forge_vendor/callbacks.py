@@ -9,6 +9,8 @@ from typing import Any
 from google.adk.agents.callback_context import CallbackContext
 from google.genai import types
 
+from communication.schema import MessageType
+
 from .state_keys import (
     COMMUNICATION_KEY,
     PRODUCT_KEY,
@@ -16,6 +18,7 @@ from .state_keys import (
     RFQ_ID_KEY,
     VENDOR_ID_KEY,
 )
+
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +64,68 @@ def _state_summary(state: dict[str, Any]) -> str:
     )
 
 
+def _initial_state_from_rfq(envelope: dict[str, Any]) -> dict[str, Any]:
+    """Build the canonical vendor state skeleton from an incoming RFQ envelope.
+
+    Only called when message_type == 'RFQ' and the session is brand-new.
+    The product.price / sku / unit fields are stubs — the quote agent's
+    get_vendor_product_details tool fills them in from the catalog on turn 1.
+    """
+    item: dict[str, Any] = (envelope.get("payload") or {}).get("item") or {}
+    return {
+        VENDOR_ID_KEY: envelope.get("vendor_id", ""),
+        RFQ_ID_KEY: envelope.get("rfq_id", ""),
+        ROUND_KEY: 0,
+        PRODUCT_KEY: {
+            "id": item.get("product_id") or item.get("id", ""),
+            "sku": item.get("sku", ""),
+            "currency": item.get("currency", "USD"),
+            "unit": item.get("unit", "unit"),
+            "price": float(item.get("unit_price") or 0),
+            "quantity": int(item.get("quantity") or 1),
+        },
+        COMMUNICATION_KEY: [envelope],   # seed with the RFQ itself
+    }
+
+
 # ── callback ──────────────────────────────────────────────────────────────────
+
+def before_agent_callback(callback_context: CallbackContext) -> types.Content | None:
+    print("inside before vendor agent: BEFORE", callback_context.state.to_dict())
+    req_type = callback_context.state.get("type")
+    if req_type == "error":
+        return types.Content(
+            role="model",
+            parts=[types.Part(text=callback_context.state.get("message") or "Validation failed")],
+        )
+
+
+    # check if the message type is RFQ 
+    # if yes -> set the initial state
+    # if no -> check if the state for already active session
+    #   if no -> return the validation error
+    #   if yes -> store the request into the state and go ahead
+
+    body = callback_context.state.get("temp:request_body")
+
+    message_type = body.get("message_type")
+
+    communications = callback_context.state.get(COMMUNICATION_KEY)
+
+    if message_type == MessageType.RFQ:
+        initial_val = _initial_state_from_rfq(body)
+        callback_context.state.update(initial_val)
+    elif not communications or len(communications) == 0:
+        return types.Content(
+            role="model",
+            parts=[types.Part(text="No session found. Please start a new session.")],
+        )
+    else:
+        communications.append(body)
+        callback_context.state[COMMUNICATION_KEY] = communications
+
+    print("inside before vendor agent : AFTER", callback_context.state.to_dict())
+    return None
 
 def log_vendor_before_agent(
     callback_context: CallbackContext,
@@ -131,4 +195,4 @@ def log_vendor_before_agent(
     return None
 
 
-__all__ = ["log_vendor_before_agent"]
+__all__ = ["log_vendor_before_agent", "before_agent_callback"]
