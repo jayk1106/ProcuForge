@@ -131,10 +131,11 @@ def send_response(
     if vendor_unit_price is not None:
         tool_context.state[LATEST_OFFER_PRICE_KEY] = vendor_unit_price
 
-    tool_context.state[ROUND_KEY] = negotiation_round + 1
+    # tool_context.state[ROUND_KEY] = negotiation_round + 1
 
-    comms = list(tool_context.state.get(COMMUNICATION_KEY) or [])
-    comms.append(envelope)
-    tool_context.state[COMMUNICATION_KEY] = comms
+    # comms = list(tool_context.state.get(COMMUNICATION_KEY) or [])
+    # comms.append(envelope)
+    # tool_context.state[COMMUNICATION_KEY] = comms
+    tool_context.state["temp:response_body"] = envelope
 
     return envelope

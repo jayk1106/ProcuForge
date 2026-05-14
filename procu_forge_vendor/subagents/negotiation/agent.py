@@ -2,6 +2,8 @@ from google.adk.agents import Agent
 
 from .tools import get_negotiation_context, send_response
 
+from .callback import after_agent_callback
+
 NEGOTIATION_INSTRUCTION = """
 You are the Negotiation Agent for Procuforge (vendor side).
 
@@ -44,4 +46,5 @@ negotiation_agent = Agent(
     description="Handles counter-offers and confirmations anchored on last selling price.",
     instruction=NEGOTIATION_INSTRUCTION,
     tools=[get_negotiation_context, send_response],
+    after_agent_callback=after_agent_callback,
 )
