@@ -11,11 +11,14 @@ from google.genai import types
 
 from communication.schema import MessageType
 
+from .communication_status import VendorThreadStatus, set_status
 from .state_keys import (
     COMMUNICATION_KEY,
+    GRN_KEY,
+    PO_KEY,
     PRODUCT_KEY,
-    ROUND_KEY,
     RFQ_ID_KEY,
+    ROUND_KEY,
     VENDOR_ID_KEY,
 )
 
@@ -67,11 +70,11 @@ def _state_summary(state: dict[str, Any]) -> str:
 def _initial_state_from_rfq(envelope: dict[str, Any]) -> dict[str, Any]:
     """Build the canonical vendor state skeleton from an incoming RFQ envelope.
 
-    Only called when message_type == 'RFQ' and the session is brand-new.
-    The product.price / sku / unit fields are stubs — the quote agent's
-    get_vendor_product_details tool fills them in from the catalog on turn 1.
+    Only called when ``message_type == "RFQ"``. The product.price field is a
+    stub; the quote agent fills authoritative pricing from the catalog.
     """
-    item: dict[str, Any] = (envelope.get("payload") or {}).get("item") or {}
+    payload: dict[str, Any] = envelope.get("payload") or {}
+    item: dict[str, Any] = payload.get("item") or {}
     return {
         VENDOR_ID_KEY: envelope.get("vendor_id", ""),
         RFQ_ID_KEY: envelope.get("rfq_id", ""),
@@ -79,68 +82,114 @@ def _initial_state_from_rfq(envelope: dict[str, Any]) -> dict[str, Any]:
         PRODUCT_KEY: {
             "id": item.get("product_id") or item.get("id", ""),
             "sku": item.get("sku", ""),
-            "currency": item.get("currency", "USD"),
+            "currency": payload.get("currency") or "USD",
             "unit": item.get("unit", "unit"),
-            "price": float(item.get("unit_price") or 0),
+            "price": 0.0,
             "quantity": int(item.get("quantity") or 1),
         },
-        COMMUNICATION_KEY: [envelope],   # seed with the RFQ itself
+        COMMUNICATION_KEY: [envelope],
     }
+
+
+def _ack_reply(text: str) -> types.Content:
+    return types.Content(role="model", parts=[types.Part(text=text)])
 
 
 # ── callback ──────────────────────────────────────────────────────────────────
 
 def before_agent_callback(callback_context: CallbackContext) -> types.Content | None:
-    print("inside before vendor agent: BEFORE", callback_context.state.to_dict())
+    """Validate the inbound envelope, advance status, and short-circuit
+    no-response message types (RFQ_CLOSED, PROCESS_COMPLETE) before any
+    subagent dispatch.
+    """
     req_type = callback_context.state.get("type")
     if req_type == "error":
-        return types.Content(
-            role="model",
-            parts=[types.Part(text=callback_context.state.get("message") or "Validation failed")],
+        return _ack_reply(
+            callback_context.state.get("message") or "Validation failed"
         )
 
-
-    # check if the message type is RFQ 
-    # if yes -> set the initial state
-    # if no -> check if the state for already active session
-    #   if no -> return the validation error
-    #   if yes -> store the request into the state and go ahead
-
     body = callback_context.state.get("temp:request_body")
+    if not body:
+        return _ack_reply("No request body found in state.")
 
     message_type = body.get("message_type")
-
     communications = callback_context.state.get(COMMUNICATION_KEY)
 
     if message_type == MessageType.RFQ:
         initial_val = _initial_state_from_rfq(body)
         callback_context.state.update(initial_val)
-    elif not communications or len(communications) == 0:
-        return types.Content(
-            role="model",
-            parts=[types.Part(text="No session found. Please start a new session.")],
-        )
-    else:
-        communications.append(body)
-        callback_context.state[COMMUNICATION_KEY] = communications
+        set_status(callback_context.state, VendorThreadStatus.RFQ_RECEIVED)
+        return None
 
-    print("inside before vendor agent : AFTER", callback_context.state.to_dict())
+    if not communications:
+        return _ack_reply("No session found. Please start a new session.")
+
+    communications.append(body)
+    callback_context.state[COMMUNICATION_KEY] = communications
+    payload = body.get("payload") or {}
+
+    if message_type == MessageType.COUNTER_OFFER:
+        set_status(callback_context.state, VendorThreadStatus.NEGOTIATION_IN_PROGRESS)
+        return None
+
+    if message_type == MessageType.ACCEPT:
+        set_status(callback_context.state, VendorThreadStatus.ACCEPTED)
+        return None
+
+    if message_type == MessageType.WALKAWAY:
+        set_status(callback_context.state, VendorThreadStatus.BUYER_WALKED_AWAY)
+        return None
+
+    if message_type == MessageType.RFQ_CLOSED:
+        set_status(callback_context.state, VendorThreadStatus.RFQ_CLOSED)
+        return _ack_reply(
+            json.dumps(
+                {
+                    "ok": True,
+                    "message": "RFQ_CLOSED acknowledged; thread closed.",
+                    "status": str(VendorThreadStatus.RFQ_CLOSED),
+                }
+            )
+        )
+
+    if message_type == MessageType.PO:
+        callback_context.state[PO_KEY] = payload
+        set_status(callback_context.state, VendorThreadStatus.PO_RECEIVED)
+        return None
+
+    if message_type == MessageType.GRN_CREATED:
+        callback_context.state[GRN_KEY] = payload
+        set_status(callback_context.state, VendorThreadStatus.GRN_RECEIVED)
+        return None
+
+    if message_type == MessageType.PROCESS_COMPLETE:
+        set_status(callback_context.state, VendorThreadStatus.COMPLETE)
+        return _ack_reply(
+            json.dumps(
+                {
+                    "ok": True,
+                    "message": "PROCESS_COMPLETE acknowledged; thread complete.",
+                    "status": str(VendorThreadStatus.COMPLETE),
+                }
+            )
+        )
+
     return None
+
 
 def log_vendor_before_agent(
     callback_context: CallbackContext,
 ) -> types.Content | None:
     """Log inbound message, session history, and current state before each turn.
 
-    Also appends non-RFQ incoming messages (counter-offer, accept, walk-away) to
-    ``state[communication]`` so the communication log tracks every buyer message.
-    The RFQ itself is already in the list via state_delta seeded by the converter.
+    Also appends non-RFQ incoming messages to ``state[communication]`` so the
+    communication log tracks every buyer message. The RFQ itself is already in
+    the list via state_delta seeded by the converter.
     """
     session = callback_context.session
     state = callback_context.state
     events = list(session.events or [])
 
-    # ── inbound message ───────────────────────────────────────────────────────
     current_text = ""
     if events:
         last = events[-1]
@@ -166,10 +215,8 @@ def log_vendor_before_agent(
         round_num,
     )
 
-    # ── state summary ─────────────────────────────────────────────────────────
     logger.info("vendor_state  %s", _state_summary(dict(state)))
 
-    # ── session history (turn 2+) ─────────────────────────────────────────────
     if prior_count > 0:
         history = [_event_tag(e) for e in events[:-1]]
         logger.info(
@@ -178,9 +225,6 @@ def log_vendor_before_agent(
             ", ".join(history),
         )
 
-    # ── track non-RFQ buyer messages in communication list ────────────────────
-    # RFQ is already seeded by state_delta in rfq_request_converter.
-    # Counter-offers, accepts, and walk-aways arrive on subsequent turns.
     if env and msg_type not in ("RFQ", "?") and prior_count > 0:
         comms: list[Any] = list(state.get(COMMUNICATION_KEY) or [])
         comms.append(env)

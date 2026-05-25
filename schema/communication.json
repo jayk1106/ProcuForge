@@ -1,13 +1,11 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Procurement Agent Communication Schema",
-  "version": "1.0.0",
-  "description": "Message schemas for A2A communication in the procurement workflow: negotiation, vendor selection, PO, GRN, and invoice verification. This file is a bundle: validate every inbound message against `envelope` first, then dispatch on `message_type` to the matching `messages.<TYPE>.payload_schema`.",
+  "description": "Message schemas for A2A communication in the procurement workflow per docs/buyer_vendor_communication_reference.md. Validate every inbound message against `envelope` first, then dispatch on `message_type` to the matching `messages.<TYPE>.payload_schema`.",
 
   "envelope": {
     "type": "object",
     "required": [
-      "schema_version",
       "message_id",
       "rfq_id",
       "vendor_id",
@@ -18,52 +16,28 @@
       "payload"
     ],
     "properties": {
-      "schema_version": {
-        "type": "string",
-        "description": "Semantic version of the schema being used.",
-        "examples": ["1.0.0"]
-      },
       "message_id": {
         "type": "string",
-        "pattern": "^msg_",
         "description": "Unique ID for this message. Used for idempotency and deduplication.",
-        "examples": ["msg_a1b2c3d4"]
+        "examples": ["msg_rfq_001"]
       },
       "rfq_id": {
         "type": "string",
-        "pattern": "^rfq_",
-        "description": "Correlation ID that threads the entire transaction from RFQ to payment.",
+        "description": "Correlation ID that threads the entire transaction from RFQ to PROCESS_COMPLETE.",
         "examples": ["rfq_2026_0001"]
       },
       "vendor_id": {
         "type": "string",
-        "description": "Identifies which vendor's pricing/context the vendor agent should load. For VENDOR_SELECTED (internal), use the selected vendor's id.",
+        "description": "Identifies which vendor's pricing/context the vendor agent should load.",
         "examples": ["vendor_123"]
       },
       "from_agent": {
         "type": "string",
-        "enum": [
-          "buyer_negotiator",
-          "buyer_decision",
-          "buyer_po",
-          "buyer_grn",
-          "buyer_verification",
-          "vendor"
-        ]
+        "enum": ["buyer_agent", "vendor_agent"]
       },
       "to_agent": {
         "type": "string",
-        "enum": [
-          "buyer_negotiator",
-          "buyer_decision",
-          "buyer_po",
-          "buyer_grn",
-          "buyer_verification",
-          "vendor",
-          "user",
-          "buyer_system"
-        ],
-        "description": "Recipient agent or, for PROCESS_COMPLETE only, `user` / `buyer_system`."
+        "enum": ["buyer_agent", "vendor_agent"]
       },
       "message_type": {
         "type": "string",
@@ -71,17 +45,13 @@
           "RFQ",
           "QUOTE",
           "COUNTER_OFFER",
-          "COUNTER_RESPONSE",
           "ACCEPT",
           "WALKAWAY",
-          "VENDOR_SELECTED",
           "RFQ_CLOSED",
           "PO",
           "PO_ACKNOWLEDGED",
           "GRN_CREATED",
           "INVOICE_SUBMITTED",
-          "INVOICE_VERIFICATION_RESULT",
-          "INVOICE_CORRECTED",
           "PROCESS_COMPLETE"
         ]
       },
@@ -89,7 +59,7 @@
         "type": ["integer", "null"],
         "minimum": 0,
         "maximum": 3,
-        "description": "Negotiation round number: 0 = RFQ, 1-3 = negotiation rounds, null (or omitted) for non-negotiation messages. Conditional rules are not enforced by the schema; agents must set this correctly."
+        "description": "Negotiation round number: 0 = RFQ/QUOTE, 1-3 = negotiation rounds, null for post-negotiation messages."
       },
       "timestamp": {
         "type": "string",
@@ -109,11 +79,6 @@
       "description": "ISO 4217 currency code.",
       "enum": ["USD", "EUR", "GBP", "INR", "JPY", "CNY", "AUD", "CAD"]
     },
-    "counter_decision": {
-      "type": "string",
-      "enum": ["COUNTER", "HOLD", "REJECT"],
-      "description": "COUNTER = propose new price, HOLD = stand by previous price, REJECT = walk away."
-    },
     "walkaway_reason": {
       "type": "string",
       "enum": ["PRICE_GAP_TOO_LARGE", "MAX_ROUNDS_REACHED", "VENDOR_REJECTED", "BUYER_CANCELLED", "QUOTE_EXPIRED"]
@@ -122,242 +87,191 @@
       "type": "string",
       "enum": ["ANOTHER_VENDOR_SELECTED", "RFQ_CANCELLED", "NO_SUITABLE_VENDOR"]
     },
-    "po_ack_status": {
+    "rfq_close_outcome": {
       "type": "string",
-      "enum": ["ACKNOWLEDGED", "REJECTED"]
+      "enum": ["NOT_SELECTED", "CANCELLED"]
     },
-    "grn_status": {
-      "type": "string",
-      "enum": ["COMPLETE", "PARTIAL", "DISCREPANCY"]
-    },
-    "grn_rejection_reason": {
-      "oneOf": [
-        {
-          "type": "string",
-          "enum": ["DAMAGED", "QUALITY_ISSUE", "WRONG_ITEM", "EXPIRED"]
-        },
-        { "type": "null" }
-      ],
-      "description": "Reason a quantity was rejected at receipt. Null when nothing was rejected."
-    },
-    "payment_terms": {
-      "type": "string",
-      "enum": ["NET_15", "NET_30", "NET_45", "NET_60", "DUE_ON_RECEIPT"]
-    },
-    "verification_status": {
-      "type": "string",
-      "enum": ["APPROVED", "REJECTED", "APPROVED_WITH_TOLERANCE"]
-    },
-    "verification_check_result": {
-      "type": "string",
-      "enum": ["PASS", "FAIL", "WARNING"]
-    },
-    "verification_next_action": {
-      "type": "string",
-      "enum": ["RESUBMIT_CORRECTED_INVOICE", "PROCEED_TO_PAYMENT", "ESCALATE_TO_HUMAN"]
-    },
-    "selection_criteria": {
-      "type": "string",
-      "enum": ["LOWEST_PRICE", "BEST_VALUE", "FASTEST_DELIVERY", "PREFERRED_VENDOR", "MANUAL_OVERRIDE"]
+    "item": {
+      "type": "object",
+      "required": ["product_id", "sku", "quantity", "unit"],
+      "properties": {
+        "product_id": { "type": "string" },
+        "sku": { "type": "string" },
+        "quantity": { "type": "integer", "minimum": 1 },
+        "unit": { "type": "string", "examples": ["pcs"] }
+      }
     }
   },
 
   "messages": {
-
     "RFQ": {
-      "direction": "buyer_negotiator → vendor",
+      "direction": "buyer_agent -> vendor_agent",
       "phase": "negotiation",
       "description": "Initial request for quote. Starts the transaction.",
       "payload_schema": {
         "type": "object",
-        "required": ["item", "required_by"],
+        "required": ["item", "required_by", "response_deadline"],
         "properties": {
-          "item": {
-            "type": "object",
-            "required": ["product_id", "sku", "quantity"],
-            "properties": {
-              "product_id": {
-                "type": "string",
-                "description": "Buyer catalog product identifier for the line item."
-              },
-              "sku": { "type": "string" },
-              "quantity": { "type": "integer", "minimum": 1 },
-              "unit": { "type": "string", "examples": ["pcs"] }
-            }
-          },
-          "required_by": {
-            "type": "string",
-            "format": "date",
-            "description": "Date by which goods must be delivered."
-          },
-          "response_deadline": {
-            "type": "string",
-            "format": "date-time",
-            "description": "Deadline for vendor to respond with a quote."
-          }
+          "item": { "$ref": "#/$defs/item" },
+          "required_by": { "type": "string", "format": "date" },
+          "response_deadline": { "type": "string", "format": "date-time" }
         }
       }
     },
 
     "QUOTE": {
-      "direction": "vendor → buyer_negotiator",
+      "direction": "vendor_agent -> buyer_agent",
       "phase": "negotiation",
       "description": "Vendor's initial price quote in response to RFQ.",
       "payload_schema": {
         "type": "object",
-        "required": ["product_id", "sku", "unit_price", "total_price", "currency", "valid_until"],
+        "required": ["item", "unit_price", "total_price", "currency", "required_by", "response_deadline"],
         "properties": {
-          "product_id": {
-            "type": "string",
-            "description": "Same product identifier as in the RFQ `item.product_id`."
-          },
-          "sku": {
-            "type": "string",
-            "description": "Same SKU as in the RFQ `item.sku`."
-          },
+          "item": { "$ref": "#/$defs/item" },
           "unit_price": { "type": "number", "minimum": 0 },
           "total_price": { "type": "number", "minimum": 0 },
           "currency": { "$ref": "#/$defs/currency" },
-          "valid_until": {
-            "type": "string",
-            "format": "date-time",
-            "description": "Quote expiry. Buyer must accept before this or quote can be invalidated."
-          },
-          "notes": { "type": "string" }
+          "required_by": { "type": "string", "format": "date" },
+          "response_deadline": { "type": "string", "format": "date-time" }
         }
       }
     },
 
     "COUNTER_OFFER": {
-      "direction": "buyer_negotiator → vendor",
+      "direction": "buyer_agent <-> vendor_agent (either side)",
       "phase": "negotiation",
-      "description": "Buyer proposes a different price. Sent when current quote exceeds target.",
+      "description": "Counter offer in either direction. `is_final = true` marks a best-and-final offer.",
       "payload_schema": {
         "type": "object",
-        "required": ["product_id", "sku", "proposed_unit_price", "proposed_total_price", "currency"],
+        "required": ["item", "unit_price", "total_price", "currency", "is_final", "required_by", "response_deadline"],
         "properties": {
-          "product_id": {
-            "type": "string",
-            "description": "Same product identifier as in the RFQ `item.product_id`."
-          },
-          "sku": {
-            "type": "string",
-            "description": "Same SKU as in the RFQ `item.sku`."
-          },
-          "proposed_unit_price": { "type": "number", "minimum": 0 },
-          "proposed_total_price": { "type": "number", "minimum": 0 },
+          "item": { "$ref": "#/$defs/item" },
+          "unit_price": { "type": "number", "minimum": 0 },
+          "total_price": { "type": "number", "minimum": 0 },
           "currency": { "$ref": "#/$defs/currency" },
-          "justification": { "type": "string" }
+          "is_final": { "type": "boolean" },
+          "required_by": { "type": "string", "format": "date" },
+          "response_deadline": { "type": "string", "format": "date-time" }
         }
       }
     },
 
-    "COUNTER_RESPONSE": {
-      "direction": "vendor → buyer_negotiator",
+    "ACCEPT": {
+      "direction": "buyer_agent <-> vendor_agent (either side)",
       "phase": "negotiation",
-      "description": "Vendor's response to a counter-offer. Contains a decision flag plus revised price. When decision = REJECT, vendors should repeat their last quoted price (informational only).",
+      "description": "Accept the latest price. Locks the agreed terms for downstream PO generation.",
       "payload_schema": {
         "type": "object",
-        "required": ["product_id", "sku", "decision", "unit_price", "total_price", "currency", "is_final"],
+        "required": ["item", "unit_price", "total_price", "currency", "required_by", "response_deadline"],
         "properties": {
-          "product_id": {
-            "type": "string",
-            "description": "Same product identifier as in the RFQ `item.product_id`."
-          },
-          "sku": {
-            "type": "string",
-            "description": "Same SKU as in the RFQ `item.sku`."
-          },
-          "decision": { "$ref": "#/$defs/counter_decision" },
+          "item": { "$ref": "#/$defs/item" },
           "unit_price": { "type": "number", "minimum": 0 },
           "total_price": { "type": "number", "minimum": 0 },
           "currency": { "$ref": "#/$defs/currency" },
-          "is_final": {
-            "type": "boolean",
-            "description": "If true, vendor signals this is their last offer."
-          },
-          "notes": { "type": "string" }
-        },
-        "allOf": [
-          {
-            "if": {
-              "properties": { "decision": { "const": "REJECT" } }
-            },
-            "then": {
-              "properties": { "is_final": { "const": true } }
-            }
-          }
-        ]
-      }
-    },
-
-    "ACCEPT": {
-      "direction": "buyer_negotiator → vendor",
-      "phase": "negotiation",
-      "description": "Buyer accepts the current price. Locks the agreed terms for downstream PO generation.",
-      "payload_schema": {
-        "type": "object",
-        "required": ["product_id", "sku", "agreed_unit_price", "agreed_total_price", "currency", "quantity"],
-        "properties": {
-          "product_id": {
-            "type": "string",
-            "description": "Same product identifier as in the RFQ `item.product_id`."
-          },
-          "sku": {
-            "type": "string",
-            "description": "Same SKU as in the RFQ `item.sku`."
-          },
-          "agreed_unit_price": { "type": "number", "minimum": 0 },
-          "agreed_total_price": { "type": "number", "minimum": 0 },
-          "currency": { "$ref": "#/$defs/currency" },
-          "quantity": { "type": "integer", "minimum": 1 }
+          "required_by": { "type": "string", "format": "date" },
+          "response_deadline": { "type": "string", "format": "date-time" }
         }
       }
     },
 
     "WALKAWAY": {
-      "direction": "buyer_negotiator ↔ vendor (either side)",
+      "direction": "buyer_agent <-> vendor_agent (either side)",
       "phase": "negotiation",
-      "description": "Negotiation ends with no deal. Sent when max rounds reached or price gap is unbridgeable.",
+      "description": "Negotiation ends with no deal.",
       "payload_schema": {
         "type": "object",
-        "required": ["product_id", "sku", "reason"],
+        "required": ["item", "reason"],
         "properties": {
-          "product_id": {
-            "type": "string",
-            "description": "Same product identifier as in the RFQ `item.product_id`."
-          },
-          "sku": {
-            "type": "string",
-            "description": "Same SKU as in the RFQ `item.sku`."
-          },
+          "item": { "$ref": "#/$defs/item" },
           "reason": { "$ref": "#/$defs/walkaway_reason" },
-          "last_offer": { "type": "number", "minimum": 0 },
-          "last_counter": { "type": "number", "minimum": 0 }
+          "last_unit_price": { "type": "number", "minimum": 0 },
+          "last_total_price": { "type": "number", "minimum": 0 },
+          "required_by": { "type": "string", "format": "date" },
+          "response_deadline": { "type": "string", "format": "date-time" }
         }
       }
     },
 
-    "VENDOR_SELECTED": {
-      "direction": "buyer_decision → buyer_po (internal)",
+    "RFQ_CLOSED": {
+      "direction": "buyer_agent -> vendor_agent",
       "phase": "vendor_selection",
-      "description": "Decision agent's output. Identifies the winning vendor and rationale. Internal handoff to PO agent. Envelope `vendor_id` should equal `payload.selected_vendor_id`.",
+      "description": "Notifies a vendor that the RFQ thread is closed (e.g. another vendor was selected).",
       "payload_schema": {
         "type": "object",
-        "required": ["selected_vendor_id", "selected_quote_amount", "currency", "selection_criteria"],
+        "required": ["item", "outcome", "reason"],
         "properties": {
-          "selected_vendor_id": { "type": "string" },
-          "selected_quote_amount": { "type": "number", "minimum": 0 },
-          "currency": { "$ref": "#/$defs/currency" },
-          "selection_criteria": { "$ref": "#/$defs/selection_criteria" },
-          "evaluated_vendors": {
+          "item": { "$ref": "#/$defs/item" },
+          "outcome": { "$ref": "#/$defs/rfq_close_outcome" },
+          "reason": { "$ref": "#/$defs/rfq_close_reason" }
+        }
+      }
+    },
+
+    "PO": {
+      "direction": "buyer_agent -> vendor_agent",
+      "phase": "po",
+      "description": "Formal purchase order issued to the selected vendor.",
+      "payload_schema": {
+        "type": "object",
+        "required": ["po_number", "rfq_reference", "line_items", "total_amount", "currency", "delivery_date"],
+        "properties": {
+          "po_number": { "type": "string" },
+          "rfq_reference": { "type": "string" },
+          "line_items": {
             "type": "array",
+            "minItems": 1,
             "items": {
               "type": "object",
+              "required": ["sku", "product_id", "quantity", "unit_price", "total_price"],
               "properties": {
-                "vendor_id": { "type": "string" },
-                "final_price": { "type": "number", "minimum": 0 },
-                "rank": { "type": "integer", "minimum": 1 }
+                "sku": { "type": "string" },
+                "product_id": { "type": "string" },
+                "quantity": { "type": "integer", "minimum": 1 },
+                "unit_price": { "type": "number", "minimum": 0 },
+                "total_price": { "type": "number", "minimum": 0 }
+              }
+            }
+          },
+          "total_amount": { "type": "number", "minimum": 0 },
+          "currency": { "$ref": "#/$defs/currency" },
+          "delivery_date": { "type": "string", "format": "date" }
+        }
+      }
+    },
+
+    "PO_ACKNOWLEDGED": {
+      "direction": "vendor_agent -> buyer_agent",
+      "phase": "po",
+      "description": "Vendor confirms receipt of the PO. Slim acknowledgement carrying only the po_number.",
+      "payload_schema": {
+        "type": "object",
+        "required": ["po_number"],
+        "properties": {
+          "po_number": { "type": "string" }
+        }
+      }
+    },
+
+    "GRN_CREATED": {
+      "direction": "buyer_agent -> vendor_agent",
+      "phase": "grn",
+      "description": "Goods receipt note. Records received quantities per line item.",
+      "payload_schema": {
+        "type": "object",
+        "required": ["grn_number", "po_number", "received_at", "line_items"],
+        "properties": {
+          "grn_number": { "type": "string" },
+          "po_number": { "type": "string" },
+          "received_at": { "type": "string", "format": "date-time" },
+          "line_items": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["sku", "unit_quantity"],
+              "properties": {
+                "sku": { "type": "string" },
+                "unit_quantity": { "type": "integer", "minimum": 0 }
               }
             }
           }
@@ -365,279 +279,50 @@
       }
     },
 
-    "RFQ_CLOSED": {
-      "direction": "buyer_decision → vendor (losing vendors)",
-      "phase": "vendor_selection",
-      "description": "Notifies non-winning vendors that the RFQ is closed. Lets vendor agent release reserved inventory and clean up state.",
-      "payload_schema": {
-        "type": "object",
-        "required": ["outcome", "reason", "closed_at"],
-        "properties": {
-          "outcome": {
-            "type": "string",
-            "enum": ["NOT_SELECTED", "CANCELLED"]
-          },
-          "reason": { "$ref": "#/$defs/rfq_close_reason" },
-          "closed_at": { "type": "string", "format": "date-time" }
-        }
-      }
-    },
-
-    "PO": {
-      "direction": "buyer_po → vendor",
-      "phase": "po",
-      "description": "Formal purchase order issued to the selected vendor.",
-      "payload_schema": {
-        "type": "object",
-        "required": ["po_number", "rfq_reference", "line_items", "total_amount", "currency", "delivery_date", "issued_at"],
-        "properties": {
-          "po_number": { "type": "string", "examples": ["PO-2026-0042"] },
-          "rfq_reference": { "type": "string", "description": "The rfq_id this PO ties back to." },
-          "line_items": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "type": "object",
-              "required": ["sku", "quantity", "unit_price", "line_total"],
-              "properties": {
-                "sku": { "type": "string" },
-                "description": { "type": "string" },
-                "quantity": { "type": "integer", "minimum": 1 },
-                "unit_price": { "type": "number", "minimum": 0 },
-                "line_total": { "type": "number", "minimum": 0 }
-              }
-            }
-          },
-          "total_amount": { "type": "number", "minimum": 0 },
-          "currency": { "$ref": "#/$defs/currency" },
-          "delivery_date": { "type": "string", "format": "date" },
-          "issued_at": { "type": "string", "format": "date-time" }
-        }
-      }
-    },
-
-    "PO_ACKNOWLEDGED": {
-      "direction": "vendor → buyer_po",
-      "phase": "po",
-      "description": "Vendor confirms PO terms match the negotiated agreement. Acts as the legal handshake before goods are shipped.",
-      "payload_schema": {
-        "type": "object",
-        "required": ["po_number", "status", "acknowledged_at"],
-        "properties": {
-          "po_number": { "type": "string" },
-          "status": { "$ref": "#/$defs/po_ack_status" },
-          "expected_delivery_date": { "type": "string", "format": "date" },
-          "rejection_reason": { "type": ["string", "null"] },
-          "acknowledged_at": { "type": "string", "format": "date-time" }
-        }
-      }
-    },
-
-    "GRN_CREATED": {
-      "direction": "buyer_grn → vendor + buyer_verification",
-      "phase": "grn",
-      "description": "Goods receipt note. Records what was actually received vs ordered. Triggered by physical receipt of goods.",
-      "payload_schema": {
-        "type": "object",
-        "required": ["grn_number", "po_number", "received_at", "line_items", "status"],
-        "properties": {
-          "grn_number": { "type": "string", "examples": ["GRN-2026-0089"] },
-          "po_number": { "type": "string" },
-          "received_at": { "type": "string", "format": "date-time" },
-          "received_by": { "type": "string", "description": "Identifier of warehouse user/system that confirmed receipt." },
-          "line_items": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "type": "object",
-              "required": ["sku", "ordered_quantity", "received_quantity", "accepted_quantity"],
-              "properties": {
-                "sku": { "type": "string" },
-                "ordered_quantity": { "type": "integer", "minimum": 0 },
-                "received_quantity": { "type": "integer", "minimum": 0 },
-                "accepted_quantity": {
-                  "type": "integer",
-                  "minimum": 0,
-                  "description": "Quantity passing QC. Used in 3-way match instead of received_quantity."
-                },
-                "rejected_quantity": { "type": "integer", "minimum": 0 },
-                "rejection_reason": { "$ref": "#/$defs/grn_rejection_reason" }
-              }
-            }
-          },
-          "status": { "$ref": "#/$defs/grn_status" }
-        }
-      }
-    },
-
     "INVOICE_SUBMITTED": {
-      "direction": "vendor → buyer_verification",
+      "direction": "vendor_agent -> buyer_agent",
       "phase": "invoice",
-      "description": "Vendor submits invoice for the delivered goods. Triggers the 3-way match.",
+      "description": "Vendor submits invoice for the delivered goods.",
       "payload_schema": {
         "type": "object",
         "required": ["invoice_number", "po_number", "invoice_date", "line_items", "total_amount", "currency"],
         "properties": {
-          "invoice_number": { "type": "string", "examples": ["INV-V123-2026-0017"] },
+          "invoice_number": { "type": "string" },
           "po_number": { "type": "string" },
-          "grn_reference": { "type": "string", "description": "Optional but recommended — reduces verification ambiguity." },
+          "grn_reference": { "type": "string" },
           "invoice_date": { "type": "string", "format": "date" },
           "line_items": {
             "type": "array",
             "minItems": 1,
             "items": {
               "type": "object",
-              "required": ["sku", "quantity", "unit_price", "line_total"],
+              "required": ["sku", "quantity", "unit_price", "total_price"],
               "properties": {
                 "sku": { "type": "string" },
                 "quantity": { "type": "integer", "minimum": 1 },
                 "unit_price": { "type": "number", "minimum": 0 },
-                "line_total": { "type": "number", "minimum": 0 }
+                "total_price": { "type": "number", "minimum": 0 }
               }
             }
           },
-          "subtotal": { "type": "number", "minimum": 0 },
-          "tax": { "type": "number", "minimum": 0 },
           "total_amount": { "type": "number", "minimum": 0 },
           "currency": { "$ref": "#/$defs/currency" },
-          "payment_terms": { "$ref": "#/$defs/payment_terms" },
           "due_date": { "type": "string", "format": "date" }
         }
       }
     },
 
-    "INVOICE_VERIFICATION_RESULT": {
-      "direction": "buyer_verification → vendor",
-      "phase": "invoice",
-      "description": "3-way match result (PO ↔ GRN ↔ Invoice). Drives the next action: pay, correct, or escalate.",
-      "payload_schema": {
-        "type": "object",
-        "required": ["invoice_number", "po_number", "status", "verification_round", "checks", "next_action"],
-        "properties": {
-          "invoice_number": { "type": "string" },
-          "po_number": { "type": "string" },
-          "grn_reference": { "type": "string" },
-          "status": { "$ref": "#/$defs/verification_status" },
-          "verification_round": { "type": "integer", "minimum": 1 },
-          "max_correction_rounds": {
-            "type": "integer",
-            "default": 3,
-            "description": "Cap on correction cycles before auto-escalation."
-          },
-          "checks": {
-            "type": "object",
-            "properties": {
-              "po_match": { "$ref": "#/$defs/verification_check_result" },
-              "grn_match": { "$ref": "#/$defs/verification_check_result" },
-              "price_match": { "$ref": "#/$defs/verification_check_result" },
-              "quantity_match": { "$ref": "#/$defs/verification_check_result" },
-              "tax_calculation": { "$ref": "#/$defs/verification_check_result" }
-            }
-          },
-          "discrepancies": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "required": ["field", "severity"],
-              "properties": {
-                "field": { "type": "string", "examples": ["quantity"] },
-                "expected": {},
-                "received_in_invoice": {},
-                "source": {
-                  "type": "string",
-                  "enum": ["PO", "GRN"],
-                  "description": "Which document the expected value came from."
-                },
-                "severity": {
-                  "type": "string",
-                  "enum": ["BLOCKING", "WARNING"]
-                }
-              }
-            }
-          },
-          "next_action": { "$ref": "#/$defs/verification_next_action" },
-          "verified_at": { "type": "string", "format": "date-time" }
-        }
-      }
-    },
-
-    "INVOICE_CORRECTED": {
-      "direction": "vendor → buyer_verification",
-      "phase": "invoice",
-      "description": "Vendor resubmits a corrected invoice after rejection. Capped at max_correction_rounds (default 3).",
-      "payload_schema": {
-        "type": "object",
-        "required": ["original_invoice_number", "corrected_invoice_number", "correction_round", "po_number", "line_items", "total_amount", "currency"],
-        "properties": {
-          "original_invoice_number": { "type": "string" },
-          "corrected_invoice_number": { "type": "string", "examples": ["INV-V123-2026-0017-R1"] },
-          "correction_round": { "type": "integer", "minimum": 1, "maximum": 3 },
-          "po_number": { "type": "string" },
-          "grn_reference": { "type": "string" },
-          "corrections_made": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "required": ["field", "old_value", "new_value"],
-              "properties": {
-                "field": { "type": "string" },
-                "old_value": {},
-                "new_value": {}
-              }
-            }
-          },
-          "line_items": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "type": "object",
-              "required": ["sku", "quantity", "unit_price", "line_total"],
-              "properties": {
-                "sku": { "type": "string" },
-                "quantity": { "type": "integer", "minimum": 1 },
-                "unit_price": { "type": "number", "minimum": 0 },
-                "line_total": { "type": "number", "minimum": 0 }
-              }
-            }
-          },
-          "subtotal": { "type": "number", "minimum": 0 },
-          "tax": { "type": "number", "minimum": 0 },
-          "total_amount": { "type": "number", "minimum": 0 },
-          "currency": { "$ref": "#/$defs/currency" }
-        }
-      }
-    },
-
     "PROCESS_COMPLETE": {
-      "direction": "buyer_verification → user/buyer_system",
+      "direction": "buyer_agent -> vendor_agent",
       "phase": "completion",
-      "description": "Final signal. Invoice approved, ready for human payment authorization.",
+      "description": "Lifecycle terminator. Carries the trio of identifiers stitching PO, GRN, and invoice together.",
       "payload_schema": {
         "type": "object",
-        "required": ["po_number", "invoice_number", "final_amount", "currency", "status", "user_action_required"],
+        "required": ["po_number", "grn_number", "invoice_number"],
         "properties": {
           "po_number": { "type": "string" },
           "grn_number": { "type": "string" },
-          "invoice_number": { "type": "string" },
-          "final_amount": { "type": "number", "minimum": 0 },
-          "currency": { "$ref": "#/$defs/currency" },
-          "payment_due_date": { "type": "string", "format": "date" },
-          "status": {
-            "type": "string",
-            "enum": ["READY_FOR_PAYMENT", "ESCALATED", "CLOSED_NO_DEAL"]
-          },
-          "summary": {
-            "type": "object",
-            "properties": {
-              "negotiation_rounds": { "type": "integer", "minimum": 0 },
-              "invoice_correction_rounds": { "type": "integer", "minimum": 0 },
-              "total_cycle_time_days": { "type": "integer", "minimum": 0 }
-            }
-          },
-          "user_action_required": {
-            "type": "string",
-            "enum": ["APPROVE_PAYMENT", "REVIEW_ESCALATION", "ACKNOWLEDGE_NO_DEAL"]
-          }
+          "invoice_number": { "type": "string" }
         }
       }
     }

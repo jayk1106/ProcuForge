@@ -7,33 +7,32 @@ from google.genai import types
 
 from communication.schema import MessageType
 from procu_forge_vendor.communication_status import VendorThreadStatus, set_status
-from procu_forge_vendor.state_keys import COMMUNICATION_KEY, ROUND_KEY
+from procu_forge_vendor.state_keys import COMMUNICATION_KEY
 
 
 _STATUS_BY_OUTBOUND_TYPE = {
-    MessageType.COUNTER_OFFER: VendorThreadStatus.NEGOTIATION_IN_PROGRESS,
-    MessageType.ACCEPT: VendorThreadStatus.ACCEPTED,
-    MessageType.WALKAWAY: VendorThreadStatus.VENDOR_WALKED_AWAY,
+    MessageType.PO_ACKNOWLEDGED: VendorThreadStatus.PO_ACKNOWLEDGED,
+    MessageType.INVOICE_SUBMITTED: VendorThreadStatus.INVOICE_SUBMITTED,
 }
 
 
 def after_agent_callback(callback_context: CallbackContext) -> types.Content | None:
-    """Persist the outbound negotiation envelope and advance status.
+    """Persist the outbound purchase-manager envelope and advance status.
 
     Status transitions:
-    - COUNTER_OFFER -> NEGOTIATION_IN_PROGRESS
-    - ACCEPT -> ACCEPTED
-    - WALKAWAY -> VENDOR_WALKED_AWAY
+    - PO_ACKNOWLEDGED -> PO_ACKNOWLEDGED
+    - INVOICE_SUBMITTED -> INVOICE_SUBMITTED
     """
     body = callback_context.state.get("temp:response_body")
     if not body:
+        callback_context.actions.transfer_to_agent = "procu_forge_vendor"
         return None
 
     communications = callback_context.state.get(COMMUNICATION_KEY) or []
     communications.append(body)
     callback_context.state[COMMUNICATION_KEY] = communications
     callback_context.state["temp:response_body"] = None
-    callback_context.state[ROUND_KEY] = (callback_context.state.get(ROUND_KEY) or 0) + 1
+    callback_context.actions.transfer_to_agent = "procu_forge_vendor"
 
     msg_type = body.get("message_type")
     try:

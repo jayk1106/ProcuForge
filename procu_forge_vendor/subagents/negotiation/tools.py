@@ -7,7 +7,6 @@ from google.adk.tools.base_tool import ToolContext
 from communication import A2AMessageBuilder
 from communication.payload_builder import BUYER_AGENT, VENDOR_AGENT
 from procu_forge_vendor.state_keys import (
-    COMMUNICATION_KEY,
     LAST_SELLING_PRICE_KEY,
     LATEST_BUYER_PRICE_KEY,
     LATEST_OFFER_PRICE_KEY,
@@ -54,23 +53,23 @@ def get_negotiation_context(tool_context: ToolContext) -> dict[str, Any]:
 
 
 def send_response(
-    response_type: Literal["ACCEPT", "COUNTER_RESPONSE", "WALKAWAY"],
+    response_type: Literal["ACCEPT", "COUNTER_OFFER", "WALKAWAY"],
     *,
     vendor_unit_price: float | None = None,
     buyer_proposed_price: float | None = None,
-    best_and_final: bool = False,
+    is_final: bool = False,
     walkaway_reason: str = "MAX_ROUNDS_REACHED",
     tool_context: ToolContext,
 ) -> dict[str, Any]:
     """Build the A2A envelope for the response type the LLM has chosen and record it.
 
     Args:
-        response_type: One of "ACCEPT", "COUNTER_RESPONSE", or "WALKAWAY".
-        vendor_unit_price: Required for ACCEPT and COUNTER_RESPONSE — the price
+        response_type: One of "ACCEPT", "COUNTER_OFFER", or "WALKAWAY".
+        vendor_unit_price: Required for ACCEPT and COUNTER_OFFER — the price
             the vendor is offering or agreeing to.
         buyer_proposed_price: The price the buyer proposed this round (records
             in state as latest_buyer_price when provided).
-        best_and_final: Mark this counter as the vendor's final offer.
+        is_final: Mark this counter as the vendor's best-and-final offer.
         walkaway_reason: Human-readable reason string for WALKAWAY envelopes.
 
     Returns the complete A2A envelope dict — return it exactly as your reply.
@@ -88,7 +87,7 @@ def send_response(
     if not product_id:
         return {"ok": False, "error": "product.id missing — ensure quote agent ran first"}
 
-    if response_type in ("ACCEPT", "COUNTER_RESPONSE") and vendor_unit_price is None:
+    if response_type in ("ACCEPT", "COUNTER_OFFER") and vendor_unit_price is None:
         return {"ok": False, "error": f"vendor_unit_price is required for {response_type}"}
 
     negotiation_round = int(tool_context.state.get(ROUND_KEY) or 0)
@@ -110,11 +109,11 @@ def send_response(
             unit_price=vendor_unit_price,
             negotiation_round=negotiation_round,
         )
-    elif response_type == "COUNTER_RESPONSE":
-        envelope = builder.get_counter_response_payload(
+    elif response_type == "COUNTER_OFFER":
+        envelope = builder.get_counter_offer_payload(
             unit_price=vendor_unit_price,
             negotiation_round=negotiation_round,
-            best_and_final=best_and_final,
+            is_final=is_final,
         )
     elif response_type == "WALKAWAY":
         latest_offer = tool_context.state.get(LATEST_OFFER_PRICE_KEY)
@@ -131,11 +130,6 @@ def send_response(
     if vendor_unit_price is not None:
         tool_context.state[LATEST_OFFER_PRICE_KEY] = vendor_unit_price
 
-    # tool_context.state[ROUND_KEY] = negotiation_round + 1
-
-    # comms = list(tool_context.state.get(COMMUNICATION_KEY) or [])
-    # comms.append(envelope)
-    # tool_context.state[COMMUNICATION_KEY] = comms
     tool_context.state["temp:response_body"] = envelope
 
     return envelope

@@ -10,9 +10,7 @@ from db.firestore.client import get_firestore_client
 from db.firestore.repositories.vendor_products import VendorProductRepository
 from procu_forge_vendor.pricing import quote_valid_until
 from procu_forge_vendor.state_keys import (
-    COMMUNICATION_KEY,
     PRODUCT_KEY,
-    ROUND_KEY,
     RFQ_ID_KEY,
     VENDOR_ID_KEY,
 )
@@ -22,11 +20,11 @@ async def quote_product(tool_context: ToolContext) -> dict[str, Any]:
     """Fetch vendor product details from Firestore and return a QUOTE envelope.
 
     All inputs are read from session state seeded by the incoming RFQ:
-      - state["vendor_id"]         → which vendor to look up
-      - state["rfq_id"]            → envelope thread identifier
-      - state["product"]["id"]     → product to quote
-      - state["product"]["quantity"] → requested units
-      - state["product"]["currency"] → preferred currency (fallback to DB record)
+      - state["vendor_id"]         -> which vendor to look up
+      - state["rfq_id"]            -> envelope thread identifier
+      - state["product"]["id"]     -> product to quote
+      - state["product"]["quantity"] -> requested units
+      - state["product"]["currency"] -> preferred currency (fallback to DB record)
 
     Returns a complete A2A QUOTE envelope dict, or ``{"ok": False, "error": ...}``.
     The agent must forward this payload verbatim as its response.
@@ -59,7 +57,6 @@ async def quote_product(tool_context: ToolContext) -> dict[str, Any]:
             ),
         }
 
-    # ── write authoritative product block to state ────────────────────────────
     resolved_currency = vp.pricing.currency or currency
     product_state.update(
         {
@@ -76,8 +73,8 @@ async def quote_product(tool_context: ToolContext) -> dict[str, Any]:
     )
     tool_context.state[PRODUCT_KEY] = product_state
 
-    # ── build QUOTE envelope ──────────────────────────────────────────────────
-    unit_price = vp.pricing.unit_price * (1 - 0.05)  # 5% opening discount
+    # 5% opening discount off the listed catalog price.
+    unit_price = vp.pricing.unit_price * (1 - 0.05)
 
     builder = A2AMessageBuilder(
         rfq_id=rfq_id,
@@ -94,14 +91,8 @@ async def quote_product(tool_context: ToolContext) -> dict[str, Any]:
     envelope = builder.get_quote_payload(
         unit_price=unit_price,
         negotiation_round=0,
-        valid_until=quote_valid_until(),
+        response_deadline=quote_valid_until(),
     )
 
-    # ── record in communication log ───────────────────────────────────────────
-    # comms = list(tool_context.state.get(COMMUNICATION_KEY) or [])
-    # comms.append(envelope)
-    # tool_context.state[COMMUNICATION_KEY] = comms
-    # tool_context.state[ROUND_KEY] = 0
     tool_context.state["temp:response_body"] = envelope
-
     return envelope
