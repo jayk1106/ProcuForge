@@ -8,3 +8,9 @@ PR_STATUS_KEY = "pr_status"
 PREVIOUS_PR_STATUS_KEY = "previous_pr_status"
 SELECTED_VENDOR_KEY = "selected_vendor"
 NEGOTIATION_CONFIG_KEY = "negotiation_config"
+
+# Post-negotiation purchase flow
+PO_KEY = "po"
+GRN_KEY = "grn"
+INVOICE_KEY = "invoice"
+PROCESS_COMPLETE_KEY = "process_complete"

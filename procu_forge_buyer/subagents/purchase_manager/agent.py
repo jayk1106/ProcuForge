@@ -1,48 +1,38 @@
 from google.adk.agents import Agent
 
 from .callbacks import purchase_manager_after_agent
+from .tools import send_grn_created, send_po, send_process_complete
 
+PURCHASE_MANAGER_INSTRUCTION = """
+You are the **purchase_manager_agent** for the buyer side of procurement.
 
-def create_purchase_order(vendor: str, product: str, quantity: int) -> str:
-    """
-    Create a purchase order
-    @param vendor: The vendor to create the purchase order
-    @param product: The product to create the purchase order
-    @param quantity: The quantity to create the purchase order
-    @return: The purchase order
-    """
-    return f"The purchase order for the vendor {vendor} is {product} with quantity {quantity}"
+You handle the post-negotiation document flow with the vendor over A2A.
+Read **pr_status** from session state and call **exactly one tool** per turn:
 
-def verify_delivery(purchase_order: str) -> str:
-    """
-    Verify the delivery of the purchase order
-    @param purchase_order: The purchase order to verify the delivery
-    @return: The delivery of the purchase order
-    """
-    return f"The delivery of the purchase order {purchase_order} is verified"
+| pr_status | Tool to call |
+|-----------|--------------|
+| VENDOR_SELECTED | **No tool call.** Output a one-line summary of the selected vendor and agreed price for human review. The callback will set AWAITING_USER_APPROVAL. |
+| PO_ISSUED | Call **send_po** — no arguments needed; reads all data from state. |
+| PO_ACKNOWLEDGED | Call **send_grn_created** — no arguments needed; reads PO data from state. |
+| INVOICE_UNDER_VERIFICATION | Call **send_process_complete** — no arguments needed; reads PO, GRN, and invoice from state. |
 
-def verify_invoice(purchase_order: str) -> str:
-    """
-    Verify the invoice of the purchase order
-    @param purchase_order: The purchase order to verify the invoice
-    @return: The invoice of the purchase order
-    """
-    return f"The invoice of the purchase order {purchase_order} is verified"
+Rules:
+- Call at most **one** tool per turn.
+- Return the tool result **exactly** as your reply — do not summarise or reformat.
+- If the tool returns ``{"ok": false, ...}``, return that error dict unchanged.
+- Do not call a tool that does not match the current **pr_status**.
+
+Current **pr_status**: {pr_status}
+"""
 
 purchase_manager_agent = Agent(
     name="purchase_manager_agent",
-    description="A agent that manages the purchase order, verification of the delivery and invices",
-    instruction="""
-    You are a helpful assistant that manages the purchase
-    Steps:
-        1. Create a purchase order
-        2. Verify the delivery of the purchase order
-        3. Verify the invoice
-    You have the following tools:
-    create_purchase_order, verify_delivery, verify_invoice
-    After verifying the invoice, stop. The workflow loop will advance **pr_status**.
-    """,
+    description=(
+        "Handles the post-negotiation A2A document flow: sends PO, GRN_CREATED, "
+        "and PROCESS_COMPLETE to the vendor and advances pr_status accordingly."
+    ),
+    instruction=PURCHASE_MANAGER_INSTRUCTION,
     model="gemini-flash-latest",
-    tools=[create_purchase_order, verify_delivery, verify_invoice],
+    tools=[send_po, send_grn_created, send_process_complete],
     after_agent_callback=purchase_manager_after_agent,
 )

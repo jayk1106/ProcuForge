@@ -90,7 +90,14 @@ def send_response(
     if response_type in ("ACCEPT", "COUNTER_OFFER") and vendor_unit_price is None:
         return {"ok": False, "error": f"vendor_unit_price is required for {response_type}"}
 
-    negotiation_round = int(tool_context.state.get(ROUND_KEY) or 0)
+    # Mirror the buyer's round number from the incoming envelope so both sides
+    # use the same round value for the same exchange turn.
+    request_body = dict(tool_context.state.get("temp:request_body") or {})
+    incoming_round = request_body.get("round")
+    negotiation_round = int(
+        incoming_round if incoming_round is not None
+        else tool_context.state.get(ROUND_KEY) or 0
+    )
 
     builder = A2AMessageBuilder(
         rfq_id=rfq_id,
