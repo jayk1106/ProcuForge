@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -9,7 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.config import APISettings, get_api_settings
 from api.logging_config import configure_app_logging
-from api.routers import health, test, workflow
+from api.routers import health, test, workflow, ws as ws_router
+from api.ws import manager as ws_manager
 
 load_dotenv()
 configure_app_logging()
@@ -17,7 +19,9 @@ configure_app_logging()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    # Resource setup (e.g. Firestore client, HTTP clients) goes here.
+    # Capture the main event loop so sync publishers (ADK callbacks running
+    # on BackgroundTasks worker threads) can bridge onto it safely.
+    ws_manager.bind_loop(asyncio.get_running_loop())
     yield
     # Resource teardown goes here.
 
@@ -49,6 +53,7 @@ def create_app(settings: APISettings | None = None) -> FastAPI:
     app.include_router(health.router)
     app.include_router(test.router, prefix=settings.api_v1_prefix)
     app.include_router(workflow.router, prefix=settings.api_v1_prefix)
+    app.include_router(ws_router.router)
 
     return app
 
