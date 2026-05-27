@@ -1,15 +1,27 @@
+import React from 'react'
+import { VENDORS } from '@/lib/data'
+import { AsciiRule } from '@/components/primitives/AsciiRule'
+import { VendorsTable } from '@/components/vendors/VendorsTable'
+
 export default function VendorsPage() {
   return (
-    <div className="mx-auto max-w-[1400px] px-6 py-8">
-      <div className="mb-2 text-xs" style={{ color: '#7A6E5C' }}>
-        Vendors
+    <div className="viewport">
+      <div className="crumbs">
+        <span className="here">Vendors</span>
       </div>
-      <h1 className="mb-2 text-4xl font-bold" style={{ color: '#1C1816' }}>
-        Vendors
-      </h1>
-      <p className="text-xs" style={{ color: '#7A6E5C' }}>
-        Coming soon.
-      </p>
+      <header className="page-head row between">
+        <div>
+          <h1 className="page-title">Vendor conversations</h1>
+          <div className="page-sub">
+            All agent ↔ vendor communication, grouped by vendor entity · {VENDORS.length} active threads
+          </div>
+        </div>
+        <div className="row" style={{ gap: 6 }}>
+          <button className="btn">[ export transcripts ]</button>
+        </div>
+      </header>
+      <AsciiRule />
+      <VendorsTable />
     </div>
   )
 }

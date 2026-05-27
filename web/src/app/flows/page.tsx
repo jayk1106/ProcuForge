@@ -1,51 +1,30 @@
-import { mockWorkflows, mockSummary } from '@/lib/mock-data'
-import { FlowsTable } from '@/components/flows/FlowsTable'
+import React from 'react'
+import { FLOWS } from '@/lib/data'
+import { AsciiRule } from '@/components/primitives/AsciiRule'
+import { FlowsTableWrapper } from './FlowsTableWrapper'
 
 export default function FlowsPage() {
+  const total = FLOWS.length
+  const needsAction = FLOWS.filter((f) => f.needsAction).length
+
   return (
-    <div className="mx-auto max-w-[1400px] px-6 py-8">
-      {/* Breadcrumb */}
-      <div className="mb-2 text-xs" style={{ color: '#7A6E5C' }}>
-        Flows
+    <div className="viewport">
+      <div className="crumbs">
+        <span className="here">Flows</span>
       </div>
 
-      {/* Header row */}
-      <div className="mb-6 flex items-start justify-between">
+      <header className="page-head">
         <div>
-          <h1 className="text-4xl font-bold" style={{ color: '#1C1816' }}>
-            Flows
-          </h1>
-          <p className="mt-1 text-xs" style={{ color: '#7A6E5C' }}>
-            All purchase requests across your org · {mockSummary.total} total ·{' '}
-            {mockSummary.needsAction} need action
-          </p>
+          <h1 className="page-title">Flows</h1>
+          <div className="page-sub">
+            All purchase requests across your org · {total} total · {needsAction} need action
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          <button
-            className="cursor-pointer border px-3 py-1.5 text-xs"
-            style={{
-              borderColor: '#CBBF9F',
-              color: '#1C1816',
-              background: 'transparent',
-            }}
-          >
-            [ preview empty ]
-          </button>
-          <button
-            className="cursor-pointer border px-3 py-1.5 text-xs font-bold text-white transition-colors"
-            style={{
-              backgroundColor: '#7C3010',
-              borderColor: '#7C3010',
-            }}
-            onMouseEnter={undefined}
-          >
-            [ + new request ]
-          </button>
-        </div>
-      </div>
+      </header>
 
-      {/* Table */}
-      <FlowsTable workflows={mockWorkflows} summary={mockSummary} />
+      <AsciiRule />
+
+      <FlowsTableWrapper />
     </div>
   )
 }

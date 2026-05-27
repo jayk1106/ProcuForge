@@ -1,12 +1,12 @@
 import type { Metadata } from 'next'
-import { Space_Mono } from 'next/font/google'
+import { JetBrains_Mono } from 'next/font/google'
 import './globals.css'
-import { Navbar } from '@/components/layout/Navbar'
+import { ClientShell } from '@/components/layout/ClientShell'
 
-const spaceMono = Space_Mono({
-  weight: ['400', '700'],
+const jetbrainsMono = JetBrains_Mono({
   subsets: ['latin'],
-  variable: '--font-space-mono',
+  variable: '--font-mono',
+  weight: ['300', '400', '500', '600', '700'],
   display: 'swap',
 })
 
@@ -21,10 +21,9 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" className={spaceMono.variable}>
+    <html lang="en" className={jetbrainsMono.variable}>
       <body>
-        <Navbar />
-        <main>{children}</main>
+        <ClientShell>{children}</ClientShell>
       </body>
     </html>
   )
