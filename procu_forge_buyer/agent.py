@@ -48,10 +48,11 @@ Authoritative lifecycle: **docs/request_status.md**.
 - **NO_VENDOR_AVAILABLE** — Do not delegate; terminal.
 - **VENDOR_SELECTED** — **transfer_to_agent** ``purchase_manager_agent``.
 - **AWAITING_USER_APPROVAL** — Do not delegate; human gate (**pr_status** stops the loop).
-- **PO_ISSUED**, **PO_ACKNOWLEDGED**, **PO_REJECTED**, **AWAITING_DELIVERY**,
-  **GOODS_RECEIVED**, **AWAITING_INVOICE**, **INVOICE_UNDER_VERIFICATION**,
-  **INVOICE_CORRECTION_PENDING**, **INVOICE_VERIFIED** — **transfer_to_agent**
+- **PO_ISSUED**, **PO_ACKNOWLEDGED**, **INVOICE_UNDER_VERIFICATION** — **transfer_to_agent**
   ``purchase_manager_agent``.
+- **AWAITING_DELIVERY**, **GOODS_RECEIVED**, **AWAITING_INVOICE**,
+  **INVOICE_CORRECTION_PENDING**, **INVOICE_VERIFIED**, **PO_REJECTED** — Do not delegate;
+  human gate or external trigger required (**pr_status** stops the loop).
 - **READY_FOR_PAYMENT** — Do not delegate; human gate.
 - **COMPLETED**, **CANCELLED**, **ESCALATED** — Do not delegate; terminal or handled via **pr_status**.
 

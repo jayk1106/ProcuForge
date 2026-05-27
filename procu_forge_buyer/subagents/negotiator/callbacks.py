@@ -123,9 +123,7 @@ def negotiator_after_tool(
         )
         return None
 
-    # The last entry in communications is the raw vendor reply text.
-    comms = tool_response.get("communications") or []
-    vendor_reply = comms[-1] if comms else ""
+    vendor_reply = tool_response.get("vendor_reply") or ""
     rfq_id = tool_response.get("rfq_id", "?")
     round_num = tool_response.get("round", "?")
 

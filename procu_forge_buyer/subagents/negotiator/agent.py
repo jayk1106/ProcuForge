@@ -46,8 +46,10 @@ Session **request** holds `product_id`, `quantity`, `currency`, `required_by_dat
 
 CONTEXT:
 <vendor_offers>{vendor_offers}</vendor_offers>
+<negotiation_config>{negotiation_config}</negotiation_config>
 
-If **vendor_offers.offers** includes **`vendor_ids`** (array) or a single **`vendor_id`** / **`vendor`**, only negotiate those vendor ids
+If **vendor_offers.offers** includes **`vendor_ids`** (array) or a single **`vendor_id`** / **`vendor`**, only negotiate those vendor ids.
+Use **negotiation_config** to resume a negotiation in progress — each vendor key holds the current round, done flag, and communications already sent.
 
 After negotiation completes, record a concise outcome in the conversation (quote identifiers, agreed prices, lead times, vendor confirmation references when present) and stop. The workflow loop will advance **pr_status**.
 """

@@ -11,6 +11,7 @@ from api.config import APISettings
 from api.schemas.buyer_workflow_session import BuyerWorkflowSessionState
 from api.schemas.workflow import (
     BuyerSessionRequestState,
+    WorkflowApproveResponse,
     WorkflowStartRequest,
     WorkflowStartResponse,
 )
@@ -144,6 +145,81 @@ class WorkflowService:
                 "workflow.run.failed workflow_id=%s",
                 job.workflow_id,
             )
+
+    async def approve(
+        self, workflow_id: str
+    ) -> tuple[WorkflowApproveResponse, AgentJob]:
+        """Approve a workflow at AWAITING_USER_APPROVAL and advance to PO_ISSUED.
+
+        Reads the current session, verifies the status, injects a state-delta
+        event to advance pr_status to PO_ISSUED, then returns a job to re-run
+        the agent so the purchase_manager can issue the PO.
+        """
+        from datetime import datetime, timezone
+
+        from google.adk.events.event import Event
+        from google.adk.events.event_actions import EventActions
+        from google.adk.sessions import VertexAiSessionService
+
+        from procu_forge_buyer.pr_status import PrStatus
+        from procu_forge_buyer.state_keys import PR_STATUS_KEY, PREVIOUS_PR_STATUS_KEY
+
+        self._ensure_vertex_configured()
+
+        session_service = VertexAiSessionService(
+            project=self._settings.vertex_project_id,
+            location=self._settings.vertex_location,
+        )
+        user_id = self._settings.workflow_default_user_id
+
+        session = await session_service.get_session(
+            app_name=self._settings.reasoning_engine_app_name,
+            user_id=user_id,
+            session_id=workflow_id,
+        )
+        if session is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Workflow '{workflow_id}' not found.",
+            )
+
+        current_status = session.state.get(PR_STATUS_KEY)
+        if current_status != PrStatus.AWAITING_USER_APPROVAL.value:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Workflow is not awaiting approval. "
+                    f"Current status: {current_status!r}"
+                ),
+            )
+
+        state_event = Event(
+            author="api:approve",
+            actions=EventActions(
+                state_delta={
+                    PREVIOUS_PR_STATUS_KEY: PrStatus.AWAITING_USER_APPROVAL.value,
+                    PR_STATUS_KEY: PrStatus.PO_ISSUED.value,
+                }
+            ),
+        )
+        await session_service.append_event(session, state_event)
+
+        approved_at = datetime.now(timezone.utc)
+        logger.info(
+            "workflow.approve  workflow_id=%s status=%s->PO_ISSUED",
+            workflow_id, current_status,
+        )
+
+        response = WorkflowApproveResponse(workflow_id=workflow_id, approved_at=approved_at)
+        job = AgentJob(
+            workflow_id=workflow_id,
+            user_id=user_id,
+            prompt=(
+                f"Continue procurement workflow {workflow_id}. "
+                "The PO has been approved — proceed with purchase_manager_agent."
+            ),
+        )
+        return response, job
 
     async def _validate_product(self, product_id: str) -> Product:
         product = await self._product_repo.get(product_id)

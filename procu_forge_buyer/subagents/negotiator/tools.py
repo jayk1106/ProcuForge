@@ -131,7 +131,7 @@ def _init_vendor_config(state: dict[str, Any], vendor_id: str) -> dict[str, Any]
         "target_price": unit_price,
         "vendor_id": vendor_id,
         "rfq_id": str(uuid4()),
-        "round": 0,
+        "round": None,
         "product": {
             "id": str(product_id),
             "sku": str(_get(offer, "vendorSku", "vendor_sku") or ""),
@@ -233,7 +233,6 @@ async def negotiate_with_vendor(
 
     config["round"] = round
     config["communications"].append(reply)
-    # Mark negotiation as terminal when a final message type was sent.
     if message_type in (MessageType.ACCEPT, MessageType.WALKAWAY):
         config["done"] = True
     nego[vendor_id] = config
@@ -241,4 +240,11 @@ async def negotiate_with_vendor(
 
     _log_after_vendor_call(config, round, reply)
 
-    return config
+    return {
+        "ok": True,
+        "rfq_id": config["rfq_id"],
+        "vendor_id": vendor_id,
+        "round": round,
+        "done": config.get("done", False),
+        "vendor_reply": reply,
+    }

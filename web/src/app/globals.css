@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-cream: #F2EAD0;
+  --color-rust: #7C3010;
+  --color-rust-dark: #5F240C;
+  --color-rust-active: #8B3A0F;
+  --color-ink: #1C1816;
+  --color-muted: #7A6E5C;
+  --color-border: #CBBF9F;
+  --color-dot-filled: #3A2E22;
+  --color-dot-active: #8B3A0F;
+  --color-dot-empty: #C4B898;
+  --color-complete: #1A5C30;
+}
+
+body {
+  background-color: var(--color-cream);
+  color: var(--color-ink);
+  font-family: var(--font-space-mono), ui-monospace, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}

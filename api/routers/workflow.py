@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, BackgroundTasks, status
 
 from api.dependencies import WorkflowServiceDep
-from api.schemas.workflow import WorkflowStartRequest, WorkflowStartResponse
+from api.schemas.workflow import WorkflowApproveResponse, WorkflowStartRequest, WorkflowStartResponse
 
 router = APIRouter(prefix="/workflow", tags=["workflow"])
 
@@ -29,5 +29,29 @@ async def start_workflow(
     the buyer agent run as a background task.
     """
     response, job = await service.start(payload)
+    background_tasks.add_task(service.run_agent, job)
+    return response
+
+
+@router.post(
+    "/{workflow_id}/approve",
+    response_model=WorkflowApproveResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Approve a workflow at AWAITING_USER_APPROVAL and issue the PO",
+    responses={
+        404: {"description": "Workflow not found."},
+        422: {"description": "Workflow is not awaiting approval."},
+        503: {"description": "Workflow runtime is not configured."},
+    },
+)
+async def approve_workflow(
+    workflow_id: str,
+    background_tasks: BackgroundTasks,
+    service: WorkflowServiceDep,
+) -> WorkflowApproveResponse:
+    """Advance the workflow from AWAITING_USER_APPROVAL to PO_ISSUED and
+    resume the buyer agent loop to send the Purchase Order.
+    """
+    response, job = await service.approve(workflow_id)
     background_tasks.add_task(service.run_agent, job)
     return response

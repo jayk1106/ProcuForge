@@ -140,33 +140,38 @@ def rfq_request_converter(
     base = convert_a2a_request_to_agent_run_request(request, part_converter)
     envelope = _parse_envelope(request)
 
-    state_delta: dict[str, Any] = {}
-
     if not envelope:
         _LOG.debug("rfq_request_converter: no JSON envelope, using default routing")
-        state_delta = {
-            "type": "error",
-            "message": "Validation failed",
-        }
+        return AgentRunRequest(
+            user_id=base.user_id,
+            session_id=base.session_id,
+            new_message=base.new_message,
+            run_config=base.run_config,
+            state_delta={"type": "error", "message": "No valid message body"},
+        )
 
     rfq_id = envelope.get("rfq_id")
     vendor_id = envelope.get("vendor_id")
     message_type = envelope.get("message_type")
     if not rfq_id or not vendor_id or not message_type:
-        _LOG.debug("rfq_request_converter: no rfq_id in envelope, using default routing")
-        state_delta = {
-            "type": "error",
-            "message": "Validation failed",
-        }
-
-    state_delta["temp:request_body"] = envelope
+        _LOG.debug("rfq_request_converter: missing required envelope fields")
+        return AgentRunRequest(
+            user_id=base.user_id,
+            session_id=base.session_id,
+            new_message=base.new_message,
+            run_config=base.run_config,
+            state_delta={
+                "type": "error",
+                "message": "Validation failed: missing rfq_id, vendor_id, or message_type",
+            },
+        )
 
     return AgentRunRequest(
         user_id=vendor_id,
         session_id=rfq_id,
         new_message=base.new_message,
         run_config=base.run_config,
-        state_delta=state_delta,
+        state_delta={"temp:request_body": envelope},
     )
 
 

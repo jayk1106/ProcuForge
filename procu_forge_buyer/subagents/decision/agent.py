@@ -9,7 +9,9 @@ Use **vendor_offers** and negotiation facts in session state or the conversation
 Do not invent vendors or prices.
 
 Output **exactly one line** of JSON and nothing else, in this shape:
-{"vendor": "<winning_vendor_id_or_name>"}
+{"vendor": "<winning_vendor_id>"}
+
+Use the exact **vendorId** string from **vendor_offers.offers** — not a display name.
 
 The workflow loop will run the next step. Do not call tools or transfer to other agents.
 """

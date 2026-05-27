@@ -178,3 +178,9 @@ class WorkflowStartResponse(BaseModel):
     session_id: str
     status: Literal["started"] = "started"
     started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class WorkflowApproveResponse(BaseModel):
+    workflow_id: str
+    status: Literal["approved"] = "approved"
+    approved_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
