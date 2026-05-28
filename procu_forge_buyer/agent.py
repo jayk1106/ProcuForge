@@ -57,10 +57,10 @@ Authoritative lifecycle: **docs/request_status.md**.
 - **COMPLETED**, **CANCELLED**, **ESCALATED** — Do not delegate; terminal or handled via **pr_status**.
 
 CONTEXT:
-<pr_status>{pr_status}</pr_status>
-<request>{request}</request>
-<vendor_offers>{vendor_offers}</vendor_offers>
-<selected_vendor>{selected_vendor}</selected_vendor>
+<pr_status>{pr_status?}</pr_status>
+<request>{request?}</request>
+<vendor_offers>{vendor_offers?}</vendor_offers>
+<selected_vendor>{selected_vendor?}</selected_vendor>
 
 
 If **pr_status** is missing, treat as **INITIATED** and apply the **INITIATED** row.

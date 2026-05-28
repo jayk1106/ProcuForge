@@ -1,7 +1,4 @@
 {
-  "/flows/page": "app/flows/page.js",
-  "/settings/page": "app/settings/page.js",
-  "/flows/[id]/page": "app/flows/[id]/page.js",
   "/page": "app/page.js",
-  "/vendors/page": "app/vendors/page.js"
+  "/flows/page": "app/flows/page.js"
 }
