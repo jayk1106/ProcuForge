@@ -14,9 +14,11 @@ from procu_forge_vendor.state_keys import (
     RFQ_ID_KEY,
     ROUND_KEY,
     VENDOR_ID_KEY,
+    VENDOR_IS_FINAL_KEY,
 )
 
 _MAX_ROUNDS = 3
+_PRICE_EPSILON = 0.01
 
 
 def get_negotiation_context(tool_context: ToolContext) -> dict[str, Any]:
@@ -49,6 +51,7 @@ def get_negotiation_context(tool_context: ToolContext) -> dict[str, Any]:
         "max_rounds": _MAX_ROUNDS,
         "latest_offer_price": tool_context.state.get(LATEST_OFFER_PRICE_KEY),
         "latest_buyer_price": tool_context.state.get(LATEST_BUYER_PRICE_KEY),
+        "vendor_is_final": bool(tool_context.state.get(VENDOR_IS_FINAL_KEY)),
     }
 
 
@@ -98,6 +101,41 @@ def send_response(
         incoming_round if incoming_round is not None
         else tool_context.state.get(ROUND_KEY) or 0
     )
+
+    listed_unit_price = float(product_state.get("listed_unit_price") or 0)
+    vendor_is_final = bool(tool_context.state.get(VENDOR_IS_FINAL_KEY))
+
+    if response_type in ("ACCEPT", "COUNTER_OFFER") and listed_unit_price > 0:
+        if float(vendor_unit_price) < listed_unit_price - _PRICE_EPSILON:
+            return {
+                "ok": False,
+                "error": "floor_price_violation",
+                "vendor_unit_price": float(vendor_unit_price),
+                "listed_unit_price": listed_unit_price,
+                "hint": (
+                    "vendor_unit_price is below the listed floor — counter at or "
+                    "above listed_unit_price, or WALKAWAY instead"
+                ),
+            }
+
+    if response_type == "COUNTER_OFFER" and negotiation_round >= _MAX_ROUNDS:
+        return {
+            "ok": False,
+            "error": "max_rounds_reached",
+            "negotiation_round": negotiation_round,
+            "max_rounds": _MAX_ROUNDS,
+            "hint": "respond with ACCEPT or WALKAWAY; further counters are not allowed",
+        }
+
+    if response_type == "COUNTER_OFFER" and vendor_is_final:
+        return {
+            "ok": False,
+            "error": "post_is_final_counter_rejected",
+            "hint": (
+                "a prior vendor counter was marked is_final=True; respond with "
+                "ACCEPT or WALKAWAY"
+            ),
+        }
 
     builder = A2AMessageBuilder(
         rfq_id=rfq_id,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 from typing import Any
 
 from google.adk.tools.base_tool import ToolContext
@@ -10,7 +10,6 @@ from communication import A2AMessageBuilder
 from communication.payload_builder import BUYER_AGENT, VENDOR_AGENT
 from procu_forge_vendor.state_keys import (
     GRN_KEY,
-    LATEST_OFFER_PRICE_KEY,
     PO_KEY,
     PRODUCT_KEY,
     RFQ_ID_KEY,
@@ -65,13 +64,12 @@ def acknowledge_po(tool_context: ToolContext) -> dict[str, Any]:
 def submit_invoice(tool_context: ToolContext) -> dict[str, Any]:
     """Build and submit an invoice based on the received GRN.
 
-    Reads GRN payload from state["grn"] and the agreed unit price from
-    state["latest_offer_price"]. Generates an invoice number, computes
-    line totals from GRN ``unit_quantity`` values, and builds an
-    INVOICE_SUBMITTED envelope written to state["temp:response_body"].
-
-    Returns the complete INVOICE_SUBMITTED envelope dict.
-    Return it exactly and completely as your reply.
+    Joins GRN line items (``sku`` + ``unit_quantity``) against the PO's
+    ``line_items`` (``unit_price`` per sku). The PO is the contractual
+    source of truth for pricing; the GRN is the source of truth for
+    received quantity. Returns ``{"ok": false, ...}`` when a GRN sku is
+    not present in the PO so the discrepancy is surfaced rather than
+    invoiced at the wrong price.
     """
     if not tool_context.state.get(VENDOR_ID_KEY):
         return {"ok": False, "error": "vendor_id not found in session state"}
@@ -81,16 +79,20 @@ def submit_invoice(tool_context: ToolContext) -> dict[str, Any]:
         return {"ok": False, "error": "No GRN found in state — ensure a GRN_CREATED message was received"}
 
     po = dict(tool_context.state.get(PO_KEY) or {})
+    if not po:
+        return {"ok": False, "error": "No PO found in state — cannot price invoice without PO"}
+
     po_number = grn.get("po_number") or po.get("po_number") or ""
     if not po_number:
         return {"ok": False, "error": "po_number could not be resolved from GRN or PO state"}
 
-    agreed_unit_price = tool_context.state.get(LATEST_OFFER_PRICE_KEY)
-    if not agreed_unit_price:
-        product = dict(tool_context.state.get(PRODUCT_KEY) or {})
-        agreed_unit_price = float(product.get("listed_unit_price") or 0)
-    if not agreed_unit_price:
-        return {"ok": False, "error": "agreed_unit_price not found — negotiation state missing"}
+    po_line_index: dict[str, dict[str, Any]] = {}
+    for po_item in po.get("line_items") or []:
+        sku = (po_item.get("sku") or "").strip()
+        if sku:
+            po_line_index[sku] = po_item
+    if not po_line_index:
+        return {"ok": False, "error": "PO has no line_items — cannot price invoice"}
 
     rfq_id = tool_context.state.get(RFQ_ID_KEY) or "unknown"
     invoice_number = f"INV-{rfq_id}-{uuid.uuid4().hex[:8].upper()}"
@@ -99,17 +101,36 @@ def submit_invoice(tool_context: ToolContext) -> dict[str, Any]:
     due_date = (today + timedelta(days=30)).isoformat()
 
     line_items: list[dict[str, Any]] = []
+    unknown_skus: list[str] = []
     for grn_item in grn.get("line_items") or []:
+        sku = (grn_item.get("sku") or "").strip()
         qty = int(grn_item.get("unit_quantity") or 0)
-        if qty <= 0:
+        if not sku or qty <= 0:
             continue
-        total_price = round(agreed_unit_price * qty, 2)
+        po_item = po_line_index.get(sku)
+        if po_item is None:
+            unknown_skus.append(sku)
+            continue
+        unit_price = float(po_item.get("unit_price") or 0)
+        if unit_price <= 0:
+            return {
+                "ok": False,
+                "error": f"PO line item for sku={sku!r} has no unit_price",
+            }
+        total_price = round(unit_price * qty, 2)
         line_items.append({
-            "sku": grn_item.get("sku") or "",
+            "sku": sku,
             "quantity": qty,
-            "unit_price": round(agreed_unit_price, 2),
+            "unit_price": round(unit_price, 2),
             "total_price": total_price,
         })
+
+    if unknown_skus:
+        return {
+            "ok": False,
+            "error": "GRN contains sku(s) not present in PO",
+            "unknown_skus": unknown_skus,
+        }
 
     if not line_items:
         return {"ok": False, "error": "No line items in GRN — nothing to invoice"}

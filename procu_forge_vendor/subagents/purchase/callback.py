@@ -22,17 +22,19 @@ def after_agent_callback(callback_context: CallbackContext) -> types.Content | N
     Status transitions:
     - PO_ACKNOWLEDGED -> PO_ACKNOWLEDGED
     - INVOICE_SUBMITTED -> INVOICE_SUBMITTED
+
+    Control returns to the orchestrator naturally on subagent completion;
+    no explicit ``transfer_to_agent`` is needed (matches quote / negotiation
+    after-callbacks).
     """
     body = callback_context.state.get("temp:response_body")
     if not body:
-        callback_context.actions.transfer_to_agent = "procu_forge_vendor"
         return None
 
     communications = callback_context.state.get(COMMUNICATION_KEY) or []
     communications.append(body)
     callback_context.state[COMMUNICATION_KEY] = communications
     callback_context.state["temp:response_body"] = None
-    callback_context.actions.transfer_to_agent = "procu_forge_vendor"
 
     msg_type = body.get("message_type")
     try:

@@ -16,3 +16,8 @@ ACCEPTED_PRICE_KEY = "accepted_price"
 
 PO_KEY = "po"
 GRN_KEY = "grn"
+
+VENDOR_IS_FINAL_KEY = "vendor_is_final"
+SEEN_MESSAGE_IDS_KEY = "seen_message_ids"
+
+SEEN_MESSAGE_IDS_CAP = 50
