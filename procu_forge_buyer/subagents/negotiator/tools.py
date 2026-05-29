@@ -193,8 +193,6 @@ async def negotiate_with_vendor(
 
     round = config.get("round")
     if message_type == MessageType.RFQ:
-        if round is not None:
-            return {"ok": False, "error": f"RFQ already sent for vendor_id={vendor_id!r}"}
         round = 0
     else:
         if round is None:

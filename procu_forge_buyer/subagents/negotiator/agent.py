@@ -5,7 +5,6 @@ from google.adk.agents import Agent
 from google.adk.agents.remote_a2a_agent import AGENT_CARD_WELL_KNOWN_PATH, RemoteA2aAgent
 from google.adk.tools.agent_tool import AgentTool
 
-from ...instruction_from_markdown import negotiator_instruction_from_default_markdown
 from .callbacks import (
     log_negotiator_before_agent,
     negotiator_after_agent_with_transition,
@@ -29,34 +28,93 @@ load_dotenv()
 
 # vendor_remote_agent_tool = AgentTool(agent=vendor_remote_agent)
 
-NEGOTIATOR_INSTRUCTION_SUFFIX = """
+NEGOTIATOR_INSTRUCTION = """# buyer_negotiator
+
+You negotiate prices with each vendor in `vendor_offers.offers` independently over A2A.
+Use the `negotiate_with_vendor` tool for **every** outbound message — the tool builds and
+validates the A2A envelope (message_id, rfq_id, round, timestamp, payload, etc.) for you.
+**Never** produce envelope JSON yourself.
 
 ---
 
-## Session state (payload construction)
+## Session state (read-only inputs)
 
-Session **request** holds `product_id`, `quantity`, `currency`, `required_by_date`, `budget_ceiling`, `urgency`, `delivery`, `buyer_notes`. Prefer these when reasoning about targets and deadlines. The **negotiate_with_vendor** tool sets RFQ line **`item.quantity`** from **`request.quantity`** and catalog fields from the matching **vendor_offers** row for each **`vendor_id`**.
-
-### Tool: **negotiate_with_vendor** (exactly one vendor per call)
-
-- Call the tool **once per vendor** you are actively negotiating in this phase. Use each offer’s **`vendorId`** string as **`vendor_id`** (must match a row in **vendor_offers.offers**).
-- Start each vendor with **`message_type`**: **`RFQ`**, then follow `skill.md` for **`COUNTER_OFFER`**, **`ACCEPT`**, and **`WALKAWAY`**. Schema enum values use **`ACCEPT`** (not alternate labels).
-- **`price`**: required for **`COUNTER_OFFER`** and **`ACCEPT`** (unit price). For **`WALKAWAY`**, optional numeric **`last_offer`** when you pass **`price`**.
-- **`walkaway_reason`**: required for **`WALKAWAY`** — use a **`walkaway_reason`** value from `a2a_enums.md` (for example **`MAX_ROUNDS_REACHED`**).
-
-CONTEXT:
+<request>{request?}</request>
 <vendor_offers>{vendor_offers?}</vendor_offers>
 <negotiation_config>{negotiation_config?}</negotiation_config>
 
-If **vendor_offers.offers** includes **`vendor_ids`** (array) or a single **`vendor_id`** / **`vendor`**, only negotiate those vendor ids.
-Use **negotiation_config** to resume a negotiation in progress — each vendor key holds the current round, done flag, and communications already sent.
+- `request` carries `product_id`, `quantity`, `currency`, `required_by_date`,
+  `budget_ceiling`, `urgency`, `delivery`, `buyer_notes`.
+- `vendor_offers.offers` is the candidate vendor list. Each offer's `vendorId` is the
+  `vendor_id` you pass to the tool. If `vendor_offers` carries `vendor_ids` (array) or a
+  single `vendor_id` / `vendor`, only negotiate those vendor ids.
+- `negotiation_config[<vendor_id>]` is the per-vendor resume state maintained by the tool.
+  Key fields to read each turn:
+  - `target_price` — buyer target unit price (seeded from the vendor's catalog `unitPrice`).
+  - `round` — last round number sent (`None` before RFQ, `0` after RFQ, then 1..3).
+  - `done` — `true` once you have sent `ACCEPT` or `WALKAWAY` for that vendor.
+  - `communications` — chronological log of outbound payloads and vendor replies.
 
-After negotiation completes, record a concise outcome in the conversation (quote identifiers, agreed prices, lead times, vendor confirmation references when present) and stop. The workflow loop will advance **pr_status**.
+---
+
+## Tool contract: `negotiate_with_vendor` (exactly one vendor per call)
+
+Arguments (pass as `communication_data`):
+
+- `vendor_id` (**required**) — must match an `offer.vendorId` in `vendor_offers.offers`.
+- `message_type` (**required**) — one of `RFQ`, `COUNTER_OFFER`, `ACCEPT`, `WALKAWAY`.
+- `price` — **required** unit price for `COUNTER_OFFER` and `ACCEPT`.
+  Optional `last_offer` numeric on `WALKAWAY` (pass via `price`).
+- `walkaway_reason` — **required** for `WALKAWAY`. Valid values:
+  `PRICE_GAP_TOO_LARGE`, `MAX_ROUNDS_REACHED`, `VENDOR_REJECTED`,
+  `BUYER_CANCELLED`, `QUOTE_EXPIRED`.
+
+Rules:
+
+- **Always** start a vendor with `message_type: RFQ` — the tool rejects any other type
+  until RFQ has been sent.
+- One vendor per call. Iterate vendors by issuing separate tool calls.
+- The tool returns `{ok, rfq_id, vendor_id, round, done, vendor_reply}`. Parse
+  `vendor_reply` (a JSON envelope string from the vendor) to read the vendor's
+  `message_type`, `payload.unit_price`, and `payload.is_final` before deciding the next
+  move.
+
+---
+
+## Decision loop (per vendor, each turn)
+
+Let `vendor_unit_price` = `vendor_reply.payload.unit_price`,
+`target_price` = `negotiation_config[vendor_id].target_price`,
+`round` = `negotiation_config[vendor_id].round`.
+
+1. If `negotiation_config[vendor_id].done` is true → skip this vendor.
+2. If the vendor's last reply was `WALKAWAY` → mark as done (no further calls).
+3. If the vendor's last reply was `ACCEPT` → mark as done (no further calls).
+4. If `vendor_unit_price <= target_price` → send `ACCEPT` at `vendor_unit_price`.
+5. Else if `round >= 3` **or** `vendor_reply.payload.is_final` is true →
+   send `WALKAWAY` with `walkaway_reason: MAX_ROUNDS_REACHED` (pass the last
+   `vendor_unit_price` as `price`).
+6. Else → send `COUNTER_OFFER` at `max(target_price, vendor_unit_price * 0.92)`
+   (never undercut the vendor by more than 8% in a single counter).
+
+Edge cases:
+
+- Vendor reply's `response_deadline` is already in the past →
+  `WALKAWAY` with `walkaway_reason: QUOTE_EXPIRED`.
+- Vendor never responds (tool returns empty `vendor_reply` or transport error) →
+  `WALKAWAY` with `walkaway_reason: VENDOR_REJECTED`.
+- Currency mismatch between `request.currency` and `vendor_reply.payload.currency` →
+  `WALKAWAY` with `walkaway_reason: PRICE_GAP_TOO_LARGE` (do not attempt conversion).
+
+---
+
+## Termination
+
+When every targeted vendor in `vendor_offers.offers` has `negotiation_config[vid].done == true`,
+emit a single short summary message listing per vendor: `vendor_id`, final outcome
+(`ACCEPTED` / `WALKED_AWAY`), last unit price, last round. Then stop. The workflow loop
+advances `pr_status` via the after-agent callback — do not call any other tool or agent.
 """
-
-NEGOTIATOR_INSTRUCTION = (
-    negotiator_instruction_from_default_markdown() + NEGOTIATOR_INSTRUCTION_SUFFIX
-)
 
 negotiator_agent = Agent(
     name="negotiator_agent",
