@@ -19,8 +19,13 @@ from ...callbacks import (
     managed_log_before_handler,
 )
 from ...communication_validate import CommunicationSchemaError, validate_communication_message
-from ...pr_status_transitions import pr_status_line, transition_after_negotiation
-from ...state_keys import PLANNER_PLAN_KEY
+from ...pr_status_transitions import (
+    _targeted_vendor_ids,
+    pr_status_line,
+    transition_after_negotiation,
+    transition_to_negotiation_in_progress,
+)
+from ...state_keys import NEGOTIATION_CONFIG_KEY, PLANNER_PLAN_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -46,28 +51,49 @@ def _envelope_teaser(data: dict[str, Any]) -> str:
     )
 
 
+def _negotiation_progress_line(st: dict[str, Any]) -> str:
+    """Compact ``done X/Y targeted=[…]`` snapshot for the negotiator log span."""
+    targeted = _targeted_vendor_ids(st)
+    nego = st.get(NEGOTIATION_CONFIG_KEY) or {}
+    if not targeted:
+        return "targeted=0 done=0"
+    done_ids = [
+        vid
+        for vid in targeted
+        if isinstance(nego.get(vid), dict) and nego[vid].get("done")
+    ]
+    return "targeted=%d done=%d done_ids=%s remaining=%s" % (
+        len(targeted),
+        len(done_ids),
+        ",".join(done_ids) or "-",
+        ",".join(vid for vid in targeted if vid not in done_ids) or "-",
+    )
+
+
 def _negotiator_before(ctx: CallbackContext, st: dict[str, Any]) -> str:
     return (
-        "negotiator_agent start session_id=%s request_id=%s product_id=%s plan=%s %s"
+        "negotiator_agent start session_id=%s request_id=%s product_id=%s plan=%s %s %s"
         % (
             ctx.session.id,
             _request_id(st) or "",
             _product_id(st) or "",
             _plan_summary(st.get(PLANNER_PLAN_KEY)),
             pr_status_line(st),
+            _negotiation_progress_line(st),
         )
     )
 
 
 def _negotiator_after(ctx: CallbackContext, st: dict[str, Any]) -> str:
     return (
-        "negotiator_agent end session_id=%s request_id=%s product_id=%s plan=%s %s"
+        "negotiator_agent end session_id=%s request_id=%s product_id=%s plan=%s %s %s"
         % (
             ctx.session.id,
             _request_id(st) or "",
             _product_id(st) or "",
             _plan_summary(st.get(PLANNER_PLAN_KEY)),
             pr_status_line(st),
+            _negotiation_progress_line(st),
         )
     )
 
@@ -81,6 +107,13 @@ log_negotiator_after_agent = partial(
     detail_line=_negotiator_after,
     trailing_lines=None,
 )
+
+
+def negotiator_before_agent_with_transition(callback_context: CallbackContext) -> None:
+    """Flip ``pr_status`` to ``NEGOTIATION_IN_PROGRESS`` then emit start span."""
+    transition_to_negotiation_in_progress(callback_context.state)
+    log_negotiator_before_agent(callback_context)
+    return None
 
 
 def negotiator_after_agent_with_transition(callback_context: CallbackContext) -> None:
@@ -158,6 +191,8 @@ __all__ = [
     "VENDOR_A2A_TOOL_NAME",
     "log_negotiator_after_agent",
     "log_negotiator_before_agent",
+    "negotiator_after_agent_with_transition",
     "negotiator_after_tool",
+    "negotiator_before_agent_with_transition",
     "negotiator_before_tool",
 ]

@@ -6,9 +6,9 @@ from google.adk.agents.remote_a2a_agent import AGENT_CARD_WELL_KNOWN_PATH, Remot
 from google.adk.tools.agent_tool import AgentTool
 
 from .callbacks import (
-    log_negotiator_before_agent,
     negotiator_after_agent_with_transition,
     negotiator_after_tool,
+    negotiator_before_agent_with_transition,
     negotiator_before_tool,
 )
 from .tools import negotiate_with_vendor
@@ -87,9 +87,15 @@ Let `vendor_unit_price` = `vendor_reply.payload.unit_price`,
 `target_price` = `negotiation_config[vendor_id].target_price`,
 `round` = `negotiation_config[vendor_id].round`.
 
-1. If `negotiation_config[vendor_id].done` is true → skip this vendor.
-2. If the vendor's last reply was `WALKAWAY` → mark as done (no further calls).
-3. If the vendor's last reply was `ACCEPT` → mark as done (no further calls).
+1. If `negotiation_config[vendor_id].done` is true → skip this vendor (the tool
+   will short-circuit if you call it anyway).
+2. If the vendor's last reply was `WALKAWAY` → you **MUST** send a closing
+   `WALKAWAY` back with `walkaway_reason: VENDOR_REJECTED` (pass the vendor's
+   last `unit_price` as `price`). This is what flips `done = true`; without it
+   the PR will sit in `NEGOTIATION_IN_PROGRESS` forever.
+3. If the vendor's last reply was `ACCEPT` → you **MUST** send a confirming
+   `ACCEPT` back at the vendor's `unit_price` to close the thread (this flips
+   `done = true`).
 4. If `vendor_unit_price <= target_price` → send `ACCEPT` at `vendor_unit_price`.
 5. Else if `round >= 3` **or** `vendor_reply.payload.is_final` is true →
    send `WALKAWAY` with `walkaway_reason: MAX_ROUNDS_REACHED` (pass the last
@@ -108,12 +114,29 @@ Edge cases:
 
 ---
 
+## Turn budget & multi-vendor progress
+
+- Each turn, work through **every** targeted vendor that is not yet `done`.
+  Issue one `negotiate_with_vendor` call per vendor, then move to the next vendor.
+- Do not stop a turn early just because one vendor is still mid-round; only stop
+  when you have made one move for every not-yet-done vendor (or every targeted
+  vendor is `done`).
+
+---
+
 ## Termination
 
-When every targeted vendor in `vendor_offers.offers` has `negotiation_config[vid].done == true`,
-emit a single short summary message listing per vendor: `vendor_id`, final outcome
-(`ACCEPTED` / `WALKED_AWAY`), last unit price, last round. Then stop. The workflow loop
-advances `pr_status` via the after-agent callback — do not call any other tool or agent.
+Only after every targeted vendor in `vendor_offers.offers` has
+`negotiation_config[vid].done == true` (i.e. you have sent a closing `ACCEPT` or
+`WALKAWAY` for each one via `negotiate_with_vendor`), emit a single short
+summary message listing per vendor: `vendor_id`, final outcome
+(`ACCEPTED` / `WALKED_AWAY`), last unit price, last round. Then stop. The
+workflow loop advances `pr_status` via the after-agent callback — do not call
+any other tool or agent.
+
+Never emit the summary while any targeted vendor still has `done == false`;
+the buyer workflow will resume this agent on the next loop iteration so you can
+finish those threads.
 """
 
 negotiator_agent = Agent(
@@ -122,7 +145,7 @@ negotiator_agent = Agent(
     description="Negotiates quotes with external vendors over the A2A protocol.",
     instruction=NEGOTIATOR_INSTRUCTION,
     tools=[negotiate_with_vendor],
-    before_agent_callback=log_negotiator_before_agent,
+    before_agent_callback=negotiator_before_agent_with_transition,
     after_agent_callback=negotiator_after_agent_with_transition,
     before_tool_callback=negotiator_before_tool,
     after_tool_callback=negotiator_after_tool,

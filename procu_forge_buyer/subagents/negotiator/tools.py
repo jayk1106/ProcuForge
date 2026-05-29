@@ -183,6 +183,26 @@ async def negotiate_with_vendor(
     nego: dict[str, Any] = dict(state.get(NEGOTIATION_CONFIG_KEY) or {})
 
     config = nego.get(vendor_id)
+    if isinstance(config, dict) and config.get("done"):
+        # Vendor thread already closed by an earlier ACCEPT/WALKAWAY. Refuse to
+        # reopen it so transition_after_negotiation can converge on
+        # NEGOTIATION_COMPLETED instead of looping forever.
+        _LOG.info(
+            "a2a_call_skip_already_done  vendor_id=%s rfq_id=%s round=%s",
+            vendor_id,
+            config.get("rfq_id"),
+            config.get("round"),
+        )
+        return {
+            "ok": True,
+            "rfq_id": config.get("rfq_id"),
+            "vendor_id": vendor_id,
+            "round": config.get("round"),
+            "done": True,
+            "vendor_reply": None,
+            "note": "already_done",
+        }
+
     if not isinstance(config, dict) or not config.get("rfq_id"):
         result = _init_vendor_config(state, vendor_id)
         if isinstance(result, str):

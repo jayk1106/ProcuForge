@@ -6,7 +6,12 @@ import logging
 from typing import Any, Mapping, MutableMapping
 
 from .pr_status import PrStatus
-from .state_keys import NEGOTIATION_CONFIG_KEY, PR_STATUS_KEY, PREVIOUS_PR_STATUS_KEY
+from .state_keys import (
+    NEGOTIATION_CONFIG_KEY,
+    PR_STATUS_KEY,
+    PREVIOUS_PR_STATUS_KEY,
+    VENDOR_OFFERS_KEY,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -92,26 +97,80 @@ def transition_after_vendor_discovery(
 
 # ── negotiation ───────────────────────────────────────────────────────────────
 
+def _targeted_vendor_ids(state: Mapping[str, Any]) -> list[str]:
+    """Return the vendor ids the negotiator is expected to work through.
+
+    Resolution order:
+    1. ``vendor_offers.vendor_ids`` (array) if present and non-empty.
+    2. ``vendor_offers.vendor_id`` or ``vendor_offers.vendor`` (single id) if present.
+    3. Every ``vendorId`` / ``vendor_id`` from ``vendor_offers.offers``.
+    """
+    block = state.get(VENDOR_OFFERS_KEY)
+    if not isinstance(block, dict):
+        return []
+
+    explicit_list = block.get("vendor_ids")
+    if isinstance(explicit_list, list):
+        ids = [str(v).strip() for v in explicit_list if str(v or "").strip()]
+        if ids:
+            return ids
+
+    single = block.get("vendor_id") or block.get("vendor")
+    if isinstance(single, str) and single.strip():
+        return [single.strip()]
+
+    offers = block.get("offers")
+    if not isinstance(offers, list):
+        return []
+
+    ids: list[str] = []
+    for offer in offers:
+        if not isinstance(offer, dict):
+            continue
+        vid = offer.get("vendorId") or offer.get("vendor_id")
+        if isinstance(vid, str) and vid.strip():
+            ids.append(vid.strip())
+    return ids
+
+
+def transition_to_negotiation_in_progress(state: MutableMapping[str, Any]) -> None:
+    """Flip VENDORS_DISCOVERED -> NEGOTIATION_IN_PROGRESS at negotiator start.
+
+    Idempotent: no-op if already ``NEGOTIATION_IN_PROGRESS`` or past it.
+    """
+    current = _parse_current(state.get(PR_STATUS_KEY))
+    if current != PrStatus.VENDORS_DISCOVERED:
+        return
+    _set(state, current, PrStatus.NEGOTIATION_IN_PROGRESS)
+
+
 def transition_after_negotiation(state: MutableMapping[str, Any]) -> None:
     """Advance to NEGOTIATION_IN_PROGRESS or NEGOTIATION_COMPLETED.
 
-    Reads negotiation_config to check whether any vendor has sent a terminal
-    message (ACCEPT or WALKAWAY, tracked via config["done"] = True).
-    Until at least one vendor is done, the status moves to NEGOTIATION_IN_PROGRESS
-    so the pr_router keeps delegating back to the negotiator_agent.
-    Once done, the status advances to NEGOTIATION_COMPLETED.
+    Reads ``negotiation_config`` and the targeted vendor set (see
+    :func:`_targeted_vendor_ids`). The status advances to
+    ``NEGOTIATION_COMPLETED`` only when **every** targeted vendor has a
+    terminal config entry (``done == True``, set when the buyer sends a closing
+    ``ACCEPT`` / ``WALKAWAY``). Otherwise the status sits at
+    ``NEGOTIATION_IN_PROGRESS`` so ``pr_router`` keeps delegating back to
+    ``negotiator_agent``.
     """
     current = _parse_current(state.get(PR_STATUS_KEY))
     if current not in _NEGOTIATION_SOURCE_STATUSES:
         return
 
+    targeted = _targeted_vendor_ids(state)
     nego = state.get(NEGOTIATION_CONFIG_KEY) or {}
-    negotiation_terminal = any(
-        isinstance(cfg, dict) and cfg.get("done")
-        for cfg in nego.values()
-    )
 
-    new = PrStatus.NEGOTIATION_COMPLETED if negotiation_terminal else PrStatus.NEGOTIATION_IN_PROGRESS
+    if not targeted:
+        all_done = False
+    else:
+        all_done = all(
+            isinstance(nego.get(vid), dict) and nego[vid].get("done")
+            for vid in targeted
+        )
+
+    new = PrStatus.NEGOTIATION_COMPLETED if all_done else PrStatus.NEGOTIATION_IN_PROGRESS
     if new.value == state.get(PR_STATUS_KEY):
         return
     _set(state, current, new)
