@@ -100,24 +100,12 @@ def transition_after_vendor_discovery(
 def _targeted_vendor_ids(state: Mapping[str, Any]) -> list[str]:
     """Return the vendor ids the negotiator is expected to work through.
 
-    Resolution order:
-    1. ``vendor_offers.vendor_ids`` (array) if present and non-empty.
-    2. ``vendor_offers.vendor_id`` or ``vendor_offers.vendor`` (single id) if present.
-    3. Every ``vendorId`` / ``vendor_id`` from ``vendor_offers.offers``.
+    Scans ``vendor_offers.offers`` for ``vendor_id`` entries — the field name
+    used by ``load_vendor_offers_for_product``.
     """
     block = state.get(VENDOR_OFFERS_KEY)
     if not isinstance(block, dict):
         return []
-
-    explicit_list = block.get("vendor_ids")
-    if isinstance(explicit_list, list):
-        ids = [str(v).strip() for v in explicit_list if str(v or "").strip()]
-        if ids:
-            return ids
-
-    single = block.get("vendor_id") or block.get("vendor")
-    if isinstance(single, str) and single.strip():
-        return [single.strip()]
 
     offers = block.get("offers")
     if not isinstance(offers, list):
@@ -127,7 +115,7 @@ def _targeted_vendor_ids(state: Mapping[str, Any]) -> list[str]:
     for offer in offers:
         if not isinstance(offer, dict):
             continue
-        vid = offer.get("vendorId") or offer.get("vendor_id")
+        vid = offer.get("vendor_id") or offer.get("vendorId")
         if isinstance(vid, str) and vid.strip():
             ids.append(vid.strip())
     return ids
@@ -196,6 +184,14 @@ def transition_to_awaiting_user_approval(state: MutableMapping[str, Any]) -> Non
     if current != PrStatus.VENDOR_SELECTED:
         return
     _set(state, current, PrStatus.AWAITING_USER_APPROVAL)
+
+
+def transition_to_po_issued(state: MutableMapping[str, Any]) -> None:
+    """AWAITING_USER_APPROVAL -> PO_ISSUED after human approves the selected vendor."""
+    current = _parse_current(state.get(PR_STATUS_KEY))
+    if current != PrStatus.AWAITING_USER_APPROVAL:
+        return
+    _set(state, current, PrStatus.PO_ISSUED)
 
 
 def transition_to_po_acknowledged(state: MutableMapping[str, Any]) -> None:

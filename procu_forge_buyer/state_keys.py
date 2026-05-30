@@ -14,3 +14,7 @@ PO_KEY = "po"
 GRN_KEY = "grn"
 INVOICE_KEY = "invoice"
 PROCESS_COMPLETE_KEY = "process_complete"
+
+# Human-approval gate: True once the AWAITING_USER_APPROVAL summary has been shown,
+# allowing the next loop iteration to process the user's approval message.
+PO_APPROVAL_SHOWN_KEY = "po_approval_shown"

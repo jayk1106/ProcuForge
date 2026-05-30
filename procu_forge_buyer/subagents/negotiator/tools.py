@@ -127,8 +127,13 @@ def _init_vendor_config(state: dict[str, Any], vendor_id: str) -> dict[str, Any]
 
     request = state.get("request") if isinstance(state.get("request"), dict) else {}
 
+    # Use the buyer's budget ceiling when provided; otherwise target 90% of catalog so
+    # negotiation rounds actually occur (vendor quotes at 95%, which is above target).
+    budget_ceiling = _to_float(request.get("budget_ceiling"))
+    target_price = budget_ceiling if budget_ceiling is not None else round(unit_price * 0.90, 2)
+
     return {
-        "target_price": unit_price,
+        "target_price": target_price,
         "vendor_id": vendor_id,
         "rfq_id": str(uuid4()),
         "round": None,
@@ -250,7 +255,11 @@ async def negotiate_with_vendor(
     )
 
     config["round"] = round
-    config["communications"].append(reply)
+    try:
+        parsed_reply = json.loads(reply)
+        config["communications"].append(parsed_reply if isinstance(parsed_reply, dict) else reply)
+    except json.JSONDecodeError:
+        config["communications"].append(reply)
     if message_type in (MessageType.ACCEPT, MessageType.WALKAWAY):
         config["done"] = True
     nego[vendor_id] = config

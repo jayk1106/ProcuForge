@@ -106,15 +106,22 @@ def send_response(
     vendor_is_final = bool(tool_context.state.get(VENDOR_IS_FINAL_KEY))
 
     if response_type in ("ACCEPT", "COUNTER_OFFER") and listed_unit_price > 0:
-        if float(vendor_unit_price) < listed_unit_price - _PRICE_EPSILON:
+        # Floor is the vendor's minimum selling price (last_selling_price = 90% of listed),
+        # NOT the listed catalog price. The vendor already quoted below listed_unit_price
+        # (5% opening discount), so using listed_unit_price as the floor would reject
+        # every valid counter-offer and ACCEPT confirmation.
+        floor_price = tool_context.state.get(LAST_SELLING_PRICE_KEY)
+        if floor_price is None:
+            floor_price = round(listed_unit_price * 0.90, 2)
+        if float(vendor_unit_price) < float(floor_price) - _PRICE_EPSILON:
             return {
                 "ok": False,
                 "error": "floor_price_violation",
                 "vendor_unit_price": float(vendor_unit_price),
-                "listed_unit_price": listed_unit_price,
+                "floor_price": float(floor_price),
                 "hint": (
-                    "vendor_unit_price is below the listed floor — counter at or "
-                    "above listed_unit_price, or WALKAWAY instead"
+                    "vendor_unit_price is below the negotiation floor — counter at or "
+                    "above floor_price, or WALKAWAY instead"
                 ),
             }
 

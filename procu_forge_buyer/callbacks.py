@@ -11,14 +11,16 @@ from typing import Any
 from google.adk.agents.callback_context import CallbackContext
 from google.genai import types
 
+from .pr_status import PrStatus
 from .pr_status_transitions import STOP_PR_STATUSES, pr_status_line
-from .state_keys import PLANNER_PLAN_KEY, PR_STATUS_KEY
+from .state_keys import PO_APPROVAL_SHOWN_KEY, PLANNER_PLAN_KEY, PR_STATUS_KEY
 
 logger = logging.getLogger(__name__)
 
 _MAX_STATE_JSON_CHARS = 24_000
 
 _STOP_PR_STATUS_VALUES = frozenset(s.value for s in STOP_PR_STATUSES)
+_AWAITING_USER_APPROVAL_VALUE = PrStatus.AWAITING_USER_APPROVAL.value
 
 
 def _session_state_dict(callback_context: CallbackContext) -> dict[str, Any]:
@@ -178,12 +180,29 @@ manage_log_after_pr_router = partial(
 def stop_loop_if_terminal(callback_context: CallbackContext) -> types.Content | None:
     """Exit the enclosing ``LoopAgent`` when ``pr_status`` is terminal or human-gated.
 
+    AWAITING_USER_APPROVAL is treated specially: the loop stops only on the first
+    encounter (so the buyer can read the selection summary). Once ``po_approval_shown``
+    is ``True`` the gate has been shown and the loop is allowed to continue so that
+    ``pr_router`` can delegate to ``purchase_manager_agent`` for the ``approve_po`` call.
+
     Returns a minimal model ``Content`` so ADK emits an ``Event`` carrying
     ``actions.escalate`` (actions-only callbacks do not always yield an event).
     """
     status = callback_context.state.get(PR_STATUS_KEY)
     if status not in _STOP_PR_STATUS_VALUES:
         return None
+
+    if status == _AWAITING_USER_APPROVAL_VALUE:
+        if not callback_context.state.get(PO_APPROVAL_SHOWN_KEY):
+            # First encounter — mark as shown and stop the loop.
+            callback_context.state[PO_APPROVAL_SHOWN_KEY] = True
+            callback_context.actions.escalate = True
+            callback_context.actions.skip_summarization = True
+            logger.info("loop_exit reason=awaiting_user_approval pr_status=%s", status)
+            return types.Content(role="model", parts=[types.Part(text=" ")])
+        # Gate already shown — let the loop continue to process the user's approval.
+        return None
+
     callback_context.actions.escalate = True
     callback_context.actions.skip_summarization = True
     logger.info("loop_exit reason=pr_status_terminal pr_status=%s", status)

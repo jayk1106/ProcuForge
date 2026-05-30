@@ -42,10 +42,19 @@ def purchase_manager_after_agent(callback_context: CallbackContext) -> None:
 
     elif current == PrStatus.PO_ACKNOWLEDGED.value:
         grn = state.get(GRN_KEY)
-        if isinstance(grn, dict) and grn.get("grn_number"):
+        invoice = state.get(INVOICE_KEY)
+        if (
+            isinstance(grn, dict) and grn.get("grn_number")
+            and isinstance(invoice, dict) and invoice.get("invoice_number")
+        ):
             transition_to_invoice_under_verification(state)
         else:
-            logger.warning("purchase_manager: send_grn_created did not produce a valid GRN; staying at PO_ACKNOWLEDGED")
+            logger.warning(
+                "purchase_manager: GRN or invoice incomplete; staying at PO_ACKNOWLEDGED "
+                "(grn_number=%r invoice_number=%r)",
+                (grn or {}).get("grn_number"),
+                (invoice or {}).get("invoice_number"),
+            )
 
     elif current == PrStatus.INVOICE_UNDER_VERIFICATION.value:
         pc = state.get(PROCESS_COMPLETE_KEY)

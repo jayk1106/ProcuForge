@@ -10,6 +10,7 @@ from db.firestore.client import get_firestore_client
 from db.firestore.repositories.vendor_products import VendorProductRepository
 from procu_forge_vendor.pricing import quote_valid_until
 from procu_forge_vendor.state_keys import (
+    LATEST_OFFER_PRICE_KEY,
     PRODUCT_KEY,
     RFQ_ID_KEY,
     VENDOR_ID_KEY,
@@ -74,7 +75,8 @@ async def quote_product(tool_context: ToolContext) -> dict[str, Any]:
     tool_context.state[PRODUCT_KEY] = product_state
 
     # 5% opening discount off the listed catalog price.
-    unit_price = vp.pricing.unit_price * (1 - 0.05)
+    unit_price = round(vp.pricing.unit_price * (1 - 0.05), 2)
+    tool_context.state[LATEST_OFFER_PRICE_KEY] = unit_price
 
     builder = A2AMessageBuilder(
         rfq_id=rfq_id,

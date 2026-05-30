@@ -17,12 +17,15 @@ from google.adk.tools.base_tool import ToolContext
 from communication import A2AMessageBuilder
 from communication.payload_builder import BUYER_AGENT, VENDOR_AGENT
 from procu_forge_buyer.a2a_client import call_vendor
+from procu_forge_buyer.pr_status_transitions import transition_to_po_issued
 from procu_forge_buyer.state_keys import (
     GRN_KEY,
     INVOICE_KEY,
     NEGOTIATION_CONFIG_KEY,
+    PO_APPROVAL_SHOWN_KEY,
     PO_KEY,
     PROCESS_COMPLETE_KEY,
+    REQUEST_KEY,
     SELECTED_VENDOR_KEY,
 )
 
@@ -101,6 +104,28 @@ def _make_builder(config: dict[str, Any], vendor_id: str) -> A2AMessageBuilder:
 
 # ── tools ─────────────────────────────────────────────────────────────────────
 
+async def approve_po(tool_context: ToolContext) -> dict[str, Any]:
+    """Approve the selected vendor's PO and advance from AWAITING_USER_APPROVAL to PO_ISSUED.
+
+    Called once the human has confirmed they want to proceed with PO issuance.
+    Resets the approval-shown gate so future approval cycles work correctly.
+    """
+    tool_context.state[PO_APPROVAL_SHOWN_KEY] = False
+    transition_to_po_issued(tool_context.state)
+    selected = dict(tool_context.state.get(SELECTED_VENDOR_KEY) or {})
+    _LOG.info(
+        "purchase_manager approve_po  vendor=%s final_price=%s",
+        selected.get("vendor"),
+        selected.get("final_price"),
+    )
+    return {
+        "ok": True,
+        "message": "PO approved — advancing to PO_ISSUED.",
+        "vendor": selected.get("vendor"),
+        "final_price": selected.get("final_price"),
+    }
+
+
 async def send_po(tool_context: ToolContext) -> dict[str, Any]:
     """Build and send a Purchase Order to the vendor via A2A.
 
@@ -116,13 +141,24 @@ async def send_po(tool_context: ToolContext) -> dict[str, Any]:
     product = config.get("product") or {}
     communications = config.get("communications") or []
 
-    agreed_price = _extract_agreed_price(communications) or _to_float(product.get("price"))
+    # Prefer the authoritative price stored by decision_agent; fall back to
+    # scanning communications, then to the original catalog price.
+    selected = dict(tool_context.state.get(SELECTED_VENDOR_KEY) or {})
+    agreed_price = (
+        _to_float(selected.get("final_price"))
+        or _extract_agreed_price(communications)
+        or _to_float(product.get("price"))
+    )
     if agreed_price is None:
         return {"ok": False, "error": "Could not determine agreed price from negotiation_config"}
 
     quantity = int(product.get("quantity") or 1)
     po_number = f"PO-{uuid.uuid4().hex[:8].upper()}"
-    delivery_date = (date.today() + timedelta(days=14)).isoformat()
+    # Use the procurement request's required_by_date when available so the PO
+    # delivery commitment matches what the requester asked for.
+    request = dict(tool_context.state.get(REQUEST_KEY) or {})
+    required_by = request.get("required_by_date") or request.get("required_by")
+    delivery_date = required_by if required_by else (date.today() + timedelta(days=14)).isoformat()
 
     line_items = [
         {
@@ -216,7 +252,14 @@ async def send_grn_created(tool_context: ToolContext) -> dict[str, Any]:
 
     invoice = _parse_vendor_reply(reply)
     if isinstance(invoice, dict):
-        tool_context.state[INVOICE_KEY] = invoice.get("payload") or invoice
+        invoice_payload = invoice.get("payload") or invoice
+        received_grn_ref = invoice_payload.get("grn_reference")
+        if received_grn_ref and received_grn_ref != grn_number:
+            _LOG.warning(
+                "purchase_manager grn_reference mismatch: expected=%s got=%s",
+                grn_number, received_grn_ref,
+            )
+        tool_context.state[INVOICE_KEY] = invoice_payload
 
     return {"ok": True, "grn_sent": envelope, "invoice_received": invoice or reply}
 
@@ -270,7 +313,61 @@ async def send_process_complete(tool_context: ToolContext) -> dict[str, Any]:
         "invoice_number": invoice_number,
     }
 
-    return {"ok": True, "process_complete_sent": envelope, "vendor_reply": reply}
+    pc_reply = _parse_vendor_reply(reply)
+    return {"ok": True, "process_complete_sent": envelope, "vendor_reply": pc_reply or reply}
 
 
-__all__ = ["send_po", "send_grn_created", "send_process_complete"]
+async def send_rfq_closed_to_losing_vendors(tool_context: ToolContext) -> dict[str, Any]:
+    """Send RFQ_CLOSED to all vendors that were not selected.
+
+    Reads negotiation_config to find every vendor that participated in
+    negotiation, excludes the selected vendor, and sends a RFQ_CLOSED
+    envelope to each one so their threads are cleanly closed per spec.
+    """
+    selected = dict(tool_context.state.get(SELECTED_VENDOR_KEY) or {})
+    selected_vendor_id = str(selected.get("vendor") or "").strip()
+    if not selected_vendor_id:
+        return {"ok": False, "error": "selected_vendor missing from state"}
+
+    nego: dict[str, Any] = dict(tool_context.state.get(NEGOTIATION_CONFIG_KEY) or {})
+    losing_vendor_ids = [vid for vid in nego if vid != selected_vendor_id]
+
+    if not losing_vendor_ids:
+        return {"ok": True, "closed": {}, "note": "no losing vendors to notify"}
+
+    results: dict[str, Any] = {}
+    for vendor_id in losing_vendor_ids:
+        config = nego.get(vendor_id) or {}
+        rfq_id = config.get("rfq_id") or ""
+        if not rfq_id:
+            results[vendor_id] = {"ok": False, "error": "no rfq_id in negotiation_config"}
+            continue
+        try:
+            builder = _make_builder(config, vendor_id)
+            envelope = builder.get_rfq_closed_payload(
+                outcome="NOT_SELECTED",
+                reason="ANOTHER_VENDOR_SELECTED",
+            )
+            reply = await call_vendor(json.dumps(envelope), rfq_id)
+            results[vendor_id] = {"ok": True, "reply": reply}
+            _LOG.info(
+                "purchase_manager rfq_closed_sent  vendor_id=%s rfq_id=%s",
+                vendor_id, rfq_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _LOG.warning(
+                "purchase_manager rfq_closed_failed  vendor_id=%s error=%s",
+                vendor_id, exc,
+            )
+            results[vendor_id] = {"ok": False, "error": str(exc)}
+
+    return {"ok": True, "closed": results}
+
+
+__all__ = [
+    "approve_po",
+    "send_po",
+    "send_grn_created",
+    "send_process_complete",
+    "send_rfq_closed_to_losing_vendors",
+]

@@ -47,7 +47,10 @@ Authoritative lifecycle: **docs/request_status.md**.
 - **NEGOTIATION_COMPLETED** — **transfer_to_agent** ``decision_agent`` (required next step after negotiation).
 - **NO_VENDOR_AVAILABLE** — Do not delegate; terminal.
 - **VENDOR_SELECTED** — **transfer_to_agent** ``purchase_manager_agent``.
-- **AWAITING_USER_APPROVAL** — Do not delegate; human gate (**pr_status** stops the loop).
+- **AWAITING_USER_APPROVAL** — The buyer's selection summary has been shown and a PO
+  approval is pending. **transfer_to_agent** ``purchase_manager_agent`` so it can call
+  **approve_po** and advance to **PO_ISSUED**. (The loop paused after the first
+  selection summary; this turn runs only after the human sends a follow-up message.)
 - **PO_ISSUED**, **PO_ACKNOWLEDGED**, **INVOICE_UNDER_VERIFICATION** — **transfer_to_agent**
   ``purchase_manager_agent``.
 - **AWAITING_DELIVERY**, **GOODS_RECEIVED**, **AWAITING_INVOICE**,
@@ -102,7 +105,7 @@ root_agent = LoopAgent(
         "(callback), or max_iterations is reached."
     ),
     sub_agents=[pr_router],
-    max_iterations=15,
+    max_iterations=25,
     before_agent_callback=manage_log_before_orchestrator,
     after_agent_callback=manage_log_after_orchestrator,
 )

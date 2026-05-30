@@ -6,8 +6,9 @@ import logging
 
 from google.adk.tools.base_tool import ToolContext
 
+from ...pr_status import PrStatus
 from ...pr_status_transitions import transition_after_decision
-from ...state_keys import SELECTED_VENDOR_KEY
+from ...state_keys import PR_STATUS_KEY, SELECTED_VENDOR_KEY
 
 _LOG = logging.getLogger(__name__)
 
@@ -49,6 +50,21 @@ async def select_vendor(
         "outcome": outcome,
     }
     tool_context.state[SELECTED_VENDOR_KEY] = decision
+
+    if outcome == "WALKED_AWAY":
+        # All vendors walked away — set terminal status directly instead of
+        # transitioning to VENDOR_SELECTED (which would trigger a broken purchase flow).
+        tool_context.state[PR_STATUS_KEY] = PrStatus.NO_VENDOR_AVAILABLE.value
+        _LOG.info(
+            "decision_agent: no_vendor_available all_walked_away reference_vendor=%s",
+            vendor_id,
+        )
+        return {
+            "ok": True,
+            "selected_vendor": decision,
+            "note": "no vendor accepted; pr_status set to NO_VENDOR_AVAILABLE",
+        }
+
     transition_after_decision(tool_context.state)
 
     _LOG.info(

@@ -10,6 +10,8 @@ from typing import Any
 from google.adk.agents.callback_context import CallbackContext
 from google.genai import types
 
+from communication import A2AMessageBuilder
+from communication.payload_builder import BUYER_AGENT, VENDOR_AGENT
 from communication.schema import MessageType
 
 from .communication_status import VendorThreadStatus, get_status, set_status
@@ -17,6 +19,8 @@ from .state_keys import (
     ACCEPTED_PRICE_KEY,
     COMMUNICATION_KEY,
     GRN_KEY,
+    LAST_SELLING_PRICE_KEY,
+    LATEST_BUYER_PRICE_KEY,
     LATEST_OFFER_PRICE_KEY,
     PO_KEY,
     PRODUCT_KEY,
@@ -24,7 +28,9 @@ from .state_keys import (
     ROUND_KEY,
     SEEN_MESSAGE_IDS_CAP,
     SEEN_MESSAGE_IDS_KEY,
+    STATUS_KEY,
     VENDOR_ID_KEY,
+    VENDOR_IS_FINAL_KEY,
 )
 
 
@@ -78,7 +84,7 @@ def _state_summary(state: dict[str, Any]) -> str:
         f"rfq_id={state.get(RFQ_ID_KEY)!r} "
         f"round={state.get(ROUND_KEY)!r} "
         f"product_id={product.get('id')!r} "
-        f"product_price={product.get('price')!r} "
+        f"product_listed_price={product.get('listed_unit_price')!r} "
         f"comms={len(comms)}"
     )
 
@@ -88,6 +94,8 @@ def _initial_state_from_rfq(envelope: dict[str, Any]) -> dict[str, Any]:
 
     Only called when ``message_type == "RFQ"``. Currency and listed price are
     populated later by the quote agent from the vendor-product record.
+    All per-thread pricing and status keys are explicitly reset so stale values
+    from a prior session never bleed into a new RFQ thread.
     """
     payload: dict[str, Any] = envelope.get("payload") or {}
     item: dict[str, Any] = payload.get("item") or {}
@@ -102,6 +110,14 @@ def _initial_state_from_rfq(envelope: dict[str, Any]) -> dict[str, Any]:
             "quantity": int(item.get("quantity") or 1),
         },
         COMMUNICATION_KEY: [envelope],
+        # Reset all per-thread keys so a recycled session starts clean.
+        STATUS_KEY: None,
+        LAST_SELLING_PRICE_KEY: None,
+        LATEST_OFFER_PRICE_KEY: None,
+        LATEST_BUYER_PRICE_KEY: None,
+        ACCEPTED_PRICE_KEY: None,
+        VENDOR_IS_FINAL_KEY: False,
+        SEEN_MESSAGE_IDS_KEY: [],
     }
 
 
@@ -244,6 +260,46 @@ def _validate_po(payload: dict[str, Any], state: Any) -> dict[str, Any] | None:
     }
 
 
+def _validate_process_complete(payload: dict[str, Any], state: Any) -> dict[str, Any] | None:
+    """Verify an inbound PROCESS_COMPLETE references the correct PO and GRN.
+
+    Returns an error dict when validation fails, or ``None`` when the payload is valid.
+    """
+    details: list[str] = []
+
+    po_number = payload.get("po_number")
+    grn_number = payload.get("grn_number")
+    invoice_number = payload.get("invoice_number")
+
+    if not po_number:
+        details.append("po_number missing from PROCESS_COMPLETE payload")
+    else:
+        stored_po = state.get(PO_KEY) or {}
+        expected_po = stored_po.get("po_number")
+        if expected_po and po_number != expected_po:
+            details.append(
+                f"po_number={po_number!r} does not match stored PO po_number={expected_po!r}"
+            )
+
+    if not grn_number:
+        details.append("grn_number missing from PROCESS_COMPLETE payload")
+    else:
+        stored_grn = state.get(GRN_KEY) or {}
+        expected_grn = stored_grn.get("grn_number")
+        if expected_grn and grn_number != expected_grn:
+            details.append(
+                f"grn_number={grn_number!r} does not match stored GRN grn_number={expected_grn!r}"
+            )
+
+    if not invoice_number:
+        details.append("invoice_number missing from PROCESS_COMPLETE payload")
+
+    if not details:
+        return None
+    logger.warning("vendor_process_complete_validation_failed  details=%s", details)
+    return {"ok": False, "error": "process_complete_validation_failed", "details": details}
+
+
 def _validate_grn(payload: dict[str, Any], state: Any) -> dict[str, Any] | None:
     """Verify an inbound GRN matches the prior PO.
 
@@ -368,31 +424,47 @@ def before_agent_callback(callback_context: CallbackContext) -> types.Content | 
         return None
 
     if message_type == MessageType.ACCEPT:
-        unit_price = payload.get("unit_price")
-        if unit_price is not None:
-            try:
-                callback_context.state[ACCEPTED_PRICE_KEY] = float(unit_price)
-            except (TypeError, ValueError):
-                logger.warning(
-                    "vendor_accept_unit_price_unparseable  raw=%r", unit_price
-                )
+        # If the vendor already sent ACCEPT first, the buyer's confirming ACCEPT
+        # is redundant. Short-circuit to avoid an extra LLM round-trip and the
+        # spurious ACCEPTED→ACCEPTED invalid-transition warning.
+        current_status = get_status(callback_context.state)
+        if current_status == VendorThreadStatus.ACCEPTED:
+            logger.info("vendor_accept_already_confirmed  skipping redundant LLM delegation")
+            return _ack_reply(json.dumps({"ok": True, "message": "ACCEPT already confirmed."}))
+        # Do NOT write ACCEPTED_PRICE_KEY here — the outbound vendor ACCEPT envelope
+        # (emitted by negotiation/callback.py) is the authoritative source so the
+        # agreed price is the vendor's confirmed price, not the buyer's inbound value.
         set_status(callback_context.state, VendorThreadStatus.ACCEPTED)
         return None
 
     if message_type == MessageType.WALKAWAY:
-        # Buyer walkaway closes the RFQ immediately; no LLM delegation per
-        # design decision (vendor never counter-walks a buyer walkaway).
-        set_status(callback_context.state, VendorThreadStatus.BUYER_WALKED_AWAY)
+        # Only set BUYER_WALKED_AWAY when not already in VENDOR_WALKED_AWAY — that
+        # transition is invalid and was producing spurious log warnings.
+        walkaway_current = get_status(callback_context.state)
+        if walkaway_current != VendorThreadStatus.VENDOR_WALKED_AWAY:
+            set_status(callback_context.state, VendorThreadStatus.BUYER_WALKED_AWAY)
         set_status(callback_context.state, VendorThreadStatus.RFQ_CLOSED)
-        return _ack_reply(
-            json.dumps(
-                {
-                    "ok": True,
-                    "message": "Buyer WALKAWAY acknowledged; thread closed.",
-                    "status": str(VendorThreadStatus.RFQ_CLOSED),
-                }
-            )
+        # Return a proper A2A WALKAWAY envelope per the communication spec instead
+        # of a plain JSON ack.
+        walkaway_product = callback_context.state.get(PRODUCT_KEY) or {}
+        walkaway_builder = A2AMessageBuilder(
+            rfq_id=callback_context.state.get(RFQ_ID_KEY) or "",
+            vendor_id=callback_context.state.get(VENDOR_ID_KEY) or "",
+            product_id=walkaway_product.get("id") or "",
+            sku=walkaway_product.get("sku") or "",
+            quantity=int(walkaway_product.get("quantity") or 1),
+            unit=walkaway_product.get("unit") or "",
+            currency=walkaway_product.get("currency") or "USD",
+            from_agent=VENDOR_AGENT,
+            to_agent=BUYER_AGENT,
         )
+        incoming_round = body.get("round")
+        walkaway_envelope = walkaway_builder.get_walkaway_payload(
+            walkaway_reason="BUYER_WALKAWAY_ACKNOWLEDGED",
+            negotiation_round=int(incoming_round) if incoming_round is not None else 0,
+            last_unit_price=callback_context.state.get(LATEST_OFFER_PRICE_KEY),
+        )
+        return _ack_reply(json.dumps(walkaway_envelope))
 
     if message_type == MessageType.RFQ_CLOSED:
         set_status(callback_context.state, VendorThreadStatus.RFQ_CLOSED)
@@ -437,6 +509,9 @@ def before_agent_callback(callback_context: CallbackContext) -> types.Content | 
                     }
                 )
             )
+        pc_error = _validate_process_complete(payload, callback_context.state)
+        if pc_error:
+            return _ack_reply(json.dumps(pc_error))
         set_status(callback_context.state, VendorThreadStatus.COMPLETE)
         return _ack_reply(
             json.dumps(
