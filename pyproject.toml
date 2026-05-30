@@ -15,6 +15,11 @@ dependencies = [
     "uvicorn[standard]>=0.40.0",
     "vertexai>=1.43.0",
     "adk-database-memory[sqlite]>=0.1.0",
+    "google-cloud-logging>=3.11.0",
+    "google-cloud-storage>=2.18.0",
+    "google-cloud-trace>=1.13.0",
+    "opentelemetry-sdk>=1.27.0",
+    "opentelemetry-exporter-gcp-trace>=1.7.0",
 ]
 
 [tool.agents-cli]

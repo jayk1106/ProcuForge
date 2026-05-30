@@ -60,12 +60,19 @@ class APISettings(BaseSettings):
     )
     vertex_location: str = Field(
         default="us-central1",
-        validation_alias=AliasChoices("VERTEX_LOCATION", "GOOGLE_BUCKET_REGION"),
+        validation_alias=AliasChoices(
+            "VERTEX_LOCATION",
+            "GOOGLE_CLOUD_LOCATION",
+            "GOOGLE_BUCKET_REGION",
+        ),
         description="Vertex AI region (e.g. 'us-central1').",
     )
     reasoning_engine_app_name: str | None = Field(
         default=None,
-        validation_alias="REASONING_ENGINE_APP_NAME",
+        validation_alias=AliasChoices(
+            "BUYER_REASONING_ENGINE",
+            "REASONING_ENGINE_APP_NAME",
+        ),
         description=(
             "Fully-qualified Vertex AI reasoning engine resource name "
             "(projects/{project}/locations/{location}/reasoningEngines/{id})."

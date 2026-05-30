@@ -18,8 +18,9 @@ complete skeleton from turn 1:
         "communication": [ <RFQ envelope> ]
     }
 
-Sessions are stored in a local SQLite file via DatabaseSessionService, so
-state survives server restarts (suitable for local development / testing).
+Sessions are stored in the deployed vendor Agent Engine's managed Vertex AI
+session store (via VertexAiSessionService), so local runs and deployed runs
+share the same persistent state.
 
 Run:
     uv run uvicorn vendor_server:app --host 127.0.0.1 --port 8001
@@ -30,8 +31,9 @@ Or as a script:
 Environment overrides:
     VENDOR_SERVER_HOST  (default: 127.0.0.1)
     VENDOR_SERVER_PORT  (default: 8001)
-    VENDOR_SESSION_DB_URL   (full SQLAlchemy URL, optional)
-    VENDOR_SESSION_DB_PATH  (sqlite file path, default: ./data/vendor_sessions.db)
+    VENDOR_REASONING_ENGINE  (required; full reasoning engine resource name)
+    GOOGLE_CLOUD_PROJECT / GOOGLE_PROJECT_ID
+    GOOGLE_CLOUD_LOCATION / GOOGLE_BUCKET_REGION
 """
 
 from __future__ import annotations
@@ -40,7 +42,6 @@ import json
 import logging
 import os
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any
 
 import uvicorn
@@ -62,7 +63,7 @@ from google.adk.auth.credential_service.in_memory_credential_service import (
 )
 from google.adk.memory.in_memory_memory_service import InMemoryMemoryService
 from google.adk.runners import Runner
-from google.adk.sessions import DatabaseSessionService
+from google.adk.sessions import VertexAiSessionService
 from starlette.applications import Starlette
 from a2a.server.agent_execution.context import RequestContext
 
@@ -75,24 +76,38 @@ _LOG = logging.getLogger(__name__)
 _HOST = os.getenv("VENDOR_SERVER_HOST", "127.0.0.1")
 _PORT = int(os.getenv("VENDOR_SERVER_PORT", "8001"))
 
+_VENDOR_REASONING_ENGINE = os.getenv("VENDOR_REASONING_ENGINE", "").strip()
+if not _VENDOR_REASONING_ENGINE:
+    raise RuntimeError(
+        "VENDOR_REASONING_ENGINE env var is required "
+        "(see logs/procu-forge-vendor_deployment_metadata.json)"
+    )
 
-def _build_session_service() -> DatabaseSessionService:
-    """Create a DB-backed ADK session service (local sqlite by default)."""
-    db_url = os.getenv("VENDOR_SESSION_DB_URL", "").strip()
 
-    if not db_url:
-        db_path_raw = os.getenv("VENDOR_SESSION_DB_PATH", "./data/vendor_sessions.db")
-        db_path = Path(db_path_raw).expanduser().resolve()
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        db_url = f"sqlite+aiosqlite:///{db_path}"
-
-    _LOG.info("vendor session storage configured  db_url=%s", db_url)
-    return DatabaseSessionService(db_url=db_url)
+def _build_session_service() -> VertexAiSessionService:
+    """Use the deployed vendor Agent Engine's managed session store."""
+    project = (
+        os.getenv("GOOGLE_CLOUD_PROJECT")
+        or os.getenv("GOOGLE_PROJECT_ID")
+        or ""
+    ).strip()
+    location = (
+        os.getenv("GOOGLE_CLOUD_LOCATION")
+        or os.getenv("GOOGLE_BUCKET_REGION")
+        or "us-central1"
+    ).strip()
+    _LOG.info(
+        "vendor session storage: Vertex AI  project=%s location=%s engine=%s",
+        project,
+        location,
+        _VENDOR_REASONING_ENGINE,
+    )
+    return VertexAiSessionService(project=project, location=location)
 
 # ── shared runner ─────────────────────────────────────────────────────────────
 
 _runner = Runner(
-    app_name=root_agent.name,
+    app_name=_VENDOR_REASONING_ENGINE,
     agent=root_agent,
     artifact_service=InMemoryArtifactService(),
     session_service=_build_session_service(),

@@ -13,12 +13,15 @@ load_dotenv()
 
 USER_ID = 'user'
 SESSION_ID = str(uuid.uuid4())
-# APP_NAME = "procuforge"
-PROJECT_ID = os.getenv("GOOGLE_PROJECT_ID")
-LOCATION = os.getenv("GOOGLE_BUCKET_REGION")
-REASONING_ENGINE_APP_NAME = f"projects/192679313906/locations/us-central1/reasoningEngines/6000998674715377664"
 
-#  ai-agents-ratelx
+PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GOOGLE_PROJECT_ID")
+LOCATION = os.getenv("GOOGLE_CLOUD_LOCATION") or os.getenv("GOOGLE_BUCKET_REGION", "us-central1")
+REASONING_ENGINE_APP_NAME = os.getenv("BUYER_REASONING_ENGINE")
+if not REASONING_ENGINE_APP_NAME:
+    raise RuntimeError(
+        "BUYER_REASONING_ENGINE env var is required "
+        "(see logs/procu-forge-buyer_deployment_metadata.json)"
+    )
 
 async def main():
     # session_service_stateful = InMemorySessionService()
