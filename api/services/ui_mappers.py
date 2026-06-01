@@ -1,0 +1,466 @@
+"""Map ADK session.state dicts to UI-facing DTOs."""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any
+
+from api.schemas.ui_dto import (
+    ActiveVendorDTO,
+    ActivityItemDTO,
+    VendorConvoDTO,
+    VendorThreadMessageDTO,
+    VendorThreadRowDTO,
+    WorkflowDetailDTO,
+    WorkflowRowDTO,
+)
+from api.schemas.vendor_thread_status import (
+    infer_vendor_thread_status,
+    to_active_vendor_status,
+    to_state_label,
+)
+from api.services.status_mapping import (
+    action_label,
+    is_walked_away,
+    needs_action,
+    parse_pr_status,
+    pr_status_human_label,
+    pr_status_to_phase_id,
+    pr_status_to_phase_label,
+)
+from db.collections.vendor import Vendor
+from db.collections.workflow_event import WorkflowEventDoc
+from procu_forge_buyer.state_keys import (
+    GRN_KEY,
+    INVOICE_KEY,
+    NEGOTIATION_CONFIG_KEY,
+    PO_KEY,
+    PR_STATUS_KEY,
+    REQUEST_KEY,
+    SELECTED_VENDOR_KEY,
+    VENDOR_OFFERS_KEY,
+    VENDOR_THREAD_OVERRIDES_KEY,
+)
+
+
+def _thread_overrides(state: dict[str, Any]) -> dict[str, Any]:
+    raw = state.get(VENDOR_THREAD_OVERRIDES_KEY)
+    return raw if isinstance(raw, dict) else {}
+
+
+def _get(d: dict[str, Any], *keys: str, default: Any = None) -> Any:
+    for key in keys:
+        if key in d and d[key] is not None:
+            return d[key]
+    return default
+
+
+def _parse_dt(raw: str | None) -> datetime | None:
+    if not raw:
+        return None
+    try:
+        normalized = raw.replace("Z", "+00:00")
+        return datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+
+
+def _days_since(raw: str | None) -> int:
+    dt = _parse_dt(raw)
+    if dt is None:
+        return 0
+    now = datetime.now(timezone.utc)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return max(0, (now - dt).days)
+
+
+def _format_relative(raw: str | None) -> str:
+    days = _days_since(raw)
+    if days == 0:
+        return "today"
+    if days == 1:
+        return "1d ago"
+    return f"{days}d ago"
+
+
+def _vendor_country(vendor_doc: Vendor | None) -> str:
+    if vendor_doc is None:
+        return "—"
+    address = getattr(vendor_doc, "address", None)
+    country = getattr(address, "country", None) if address is not None else None
+    return country or "—"
+
+
+def _vendor_count(state: dict[str, Any]) -> int:
+    neg = state.get(NEGOTIATION_CONFIG_KEY)
+    if isinstance(neg, dict) and neg:
+        return len(neg)
+    offers = state.get(VENDOR_OFFERS_KEY)
+    if isinstance(offers, dict):
+        count = _get(offers, "offerCount", "offer_count")
+        if isinstance(count, int):
+            return count
+        offer_list = offers.get("offers")
+        if isinstance(offer_list, list):
+            return len(offer_list)
+    return 0
+
+
+def _latest_price_from_communications(comms: list[Any]) -> float | None:
+    for entry in reversed(comms):
+        if not isinstance(entry, dict):
+            continue
+        payload = entry.get("payload")
+        if isinstance(payload, dict):
+            for key in ("unit_price", "unitPrice", "price"):
+                val = payload.get(key)
+                if isinstance(val, (int, float)):
+                    return float(val)
+    return None
+
+
+def _build_thread_preview(comms: list[Any], limit: int = 3) -> list[dict[str, str]]:
+    preview: list[dict[str, str]] = []
+    for entry in comms[-limit:]:
+        if not isinstance(entry, dict):
+            continue
+        msg_type = str(entry.get("message_type") or entry.get("messageType") or "MSG")
+        round_num = entry.get("round")
+        preview.append(
+            {
+                "who": "them" if entry.get("from_agent") == "vendor_agent" else "us",
+                "what": msg_type,
+                "meta": f"round {round_num}" if round_num is not None else "",
+            }
+        )
+    return preview
+
+
+def _event_to_activity(event: WorkflowEventDoc) -> ActivityItemDTO:
+    ts = event.ts.strftime("%Y-%m-%d %H:%M") if event.ts else ""
+    payload = event.payload if isinstance(event.payload, dict) else {}
+    detail = _activity_detail_for_event(event.event_type, payload)
+    return ActivityItemDTO(ts=ts, ag=event.author or "system", det=detail)
+
+
+def _activity_detail_for_event(event_type: str, payload: dict[str, Any]) -> str:
+    if event_type == "vendor_thread_initiated":
+        return f"Started thread with vendor {payload.get('vendor_id', '?')}"
+    if event_type == "vendor_message_outbound":
+        return f"→ {payload.get('message_type') or 'MSG'} (round {payload.get('round')}) to vendor {payload.get('vendor_id', '?')}"
+    if event_type == "vendor_message_inbound":
+        return f"← {payload.get('message_type') or 'reply'} from vendor {payload.get('vendor_id', '?')}"
+    if event_type == "pr_status_changed":
+        return f"Status {payload.get('previous') or '?'} → {payload.get('current') or '?'}"
+    if event_type == "vendor_thread_escalated":
+        return f"Escalated thread {payload.get('rfq_id', '?')}"
+    if event_type == "vendor_thread_walked_away":
+        return f"Walked away from thread {payload.get('rfq_id', '?')}"
+    return event_type.replace("_", " ")
+
+
+def workflow_row_from_state(
+    workflow_id: str,
+    state: dict[str, Any],
+    *,
+    product_name: str | None = None,
+) -> WorkflowRowDTO:
+    request = state.get(REQUEST_KEY) if isinstance(state.get(REQUEST_KEY), dict) else {}
+    product = state.get("product") if isinstance(state.get("product"), dict) else {}
+    pr_status = parse_pr_status(state.get(PR_STATUS_KEY))
+
+    qty = _get(request, "quantity", default="")
+    pid = _get(request, "product_id", "productId", default="")
+    pname = product_name or _get(product, "name", default=pid) or workflow_id
+    product_label = f"{pname} × {qty}" if qty else str(pname)
+
+    created_at = _get(request, "created_at", "createdAt", default="")
+    request_id = _get(request, "request_id", "requestId", default=workflow_id)
+
+    return WorkflowRowDTO(
+        id=workflow_id,
+        requestId=str(request_id),
+        product=product_label,
+        requestedBy=str(_get(request, "requester_id", "requesterId", default="unknown")),
+        requestedAt=str(created_at)[:10] if created_at else "",
+        phase=pr_status_to_phase_label(pr_status),  # type: ignore[arg-type]
+        currentState=pr_status_human_label(pr_status),
+        vendors=_vendor_count(state),
+        days=_days_since(str(created_at) if created_at else None),
+        needsAction=needs_action(pr_status),
+        actionLabel=action_label(pr_status),
+        walked=is_walked_away(pr_status),
+    )
+
+
+def workflow_detail_from_state(
+    workflow_id: str,
+    state: dict[str, Any],
+    *,
+    vendor_names: dict[str, Vendor] | None = None,
+    events: list[WorkflowEventDoc] | None = None,
+) -> WorkflowDetailDTO:
+    request = state.get(REQUEST_KEY) if isinstance(state.get(REQUEST_KEY), dict) else {}
+    product = state.get("product") if isinstance(state.get("product"), dict) else {}
+    pr_status = parse_pr_status(state.get(PR_STATUS_KEY))
+    vendor_names = vendor_names or {}
+
+    budget = _get(request, "budget_ceiling", "budgetCeiling", default=0)
+    target = float(budget) if budget else 0.0
+
+    selected = state.get(SELECTED_VENDOR_KEY)
+    selected_vendor_id: str | None = None
+    if isinstance(selected, dict):
+        selected_vendor_id = str(_get(selected, "vendor", default="") or "") or None
+
+    overrides = _thread_overrides(state)
+    neg_config = state.get(NEGOTIATION_CONFIG_KEY)
+    vendors: list[ActiveVendorDTO] = []
+    if isinstance(neg_config, dict):
+        for vid, cfg in neg_config.items():
+            if not isinstance(cfg, dict):
+                continue
+            vendor_id = str(cfg.get("vendor_id") or vid)
+            vendor_doc = vendor_names.get(vendor_id)
+            name = vendor_doc.name if vendor_doc else vendor_id
+            country = _vendor_country(vendor_doc)
+            comms = cfg.get("communications")
+            comms_list = comms if isinstance(comms, list) else []
+            latest = _latest_price_from_communications(comms_list)
+            delta = (latest - target) if latest is not None and target else None
+            round_val = cfg.get("round")
+            rfq_id = str(cfg.get("rfq_id") or "")
+            thread_status = infer_vendor_thread_status(
+                cfg,
+                selected_vendor_id=selected_vendor_id,
+                override=overrides.get(rfq_id) if rfq_id else None,
+            )
+            prod = cfg.get("product") if isinstance(cfg.get("product"), dict) else {}
+            lead_days = _get(prod, "lead_time_days", "leadTimeDays")
+            moq = _get(prod, "minimum_order_qty", "minimumOrderQty", default=1)
+
+            vendors.append(
+                ActiveVendorDTO(
+                    id=vendor_id,
+                    rfqId=rfq_id,
+                    name=name,
+                    country=country,
+                    round=f"R{round_val}" if round_val is not None else "R0",
+                    state=to_state_label(thread_status),
+                    status=to_active_vendor_status(thread_status),
+                    latest=latest,
+                    delta=delta,
+                    moq=int(moq) if isinstance(moq, (int, float)) else 1,
+                    lead=f"{lead_days}d" if lead_days is not None else "—",
+                    escalated=thread_status.name == "ESCALATED",
+                    thread=_build_thread_preview(comms_list),
+                )
+            )
+
+    if events:
+        activity = [_event_to_activity(e) for e in events]
+    else:
+        activity = []
+        created_at = _get(request, "created_at", "createdAt")
+        if created_at:
+            activity.append(
+                ActivityItemDTO(
+                    ts=str(created_at)[:16].replace("T", " "),
+                    ag="system",
+                    det="Workflow initiated",
+                )
+            )
+        prev = state.get("previous_pr_status")
+        curr = state.get(PR_STATUS_KEY)
+        if prev and curr and prev != curr:
+            activity.append(
+                ActivityItemDTO(
+                    ts=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M"),
+                    ag="buyer_agent",
+                    det=f"Status {prev} → {curr}",
+                )
+            )
+
+    created_at = _get(request, "created_at", "createdAt")
+    request_id = _get(request, "request_id", "requestId", default=workflow_id)
+    title = _get(product, "name", default=request_id)
+
+    return WorkflowDetailDTO(
+        id=workflow_id,
+        requestId=str(request_id),
+        title=str(title),
+        requester=str(_get(request, "requester_id", "requesterId", default="unknown")),
+        costCenter=str(_get(request, "organization_id", "organizationId", default="—")),
+        opened=_format_relative(str(created_at) if created_at else None),
+        target=target,
+        needBy=str(_get(request, "required_by_date", "requiredByDate", default="—")),
+        spec=str(_get(product, "description", default=_get(request, "purpose", default=""))),
+        prStatus=pr_status.value,
+        phaseDurations={
+            "rfq": None,
+            "neg": None,
+            "po": None,
+            "grn": None,
+            "inv": None,
+            "done": None,
+        },
+        currentPhase=pr_status_to_phase_id(pr_status),
+        needsAction=needs_action(pr_status),
+        actionLabel=action_label(pr_status),
+        vendors=vendors,
+        activity=activity,
+        po=state.get(PO_KEY) if isinstance(state.get(PO_KEY), dict) else None,
+        grn=state.get(GRN_KEY) if isinstance(state.get(GRN_KEY), dict) else None,
+        invoice=state.get(INVOICE_KEY) if isinstance(state.get(INVOICE_KEY), dict) else None,
+        selectedVendor=selected if isinstance(selected, dict) else None,
+    )
+
+
+def vendor_thread_rows_from_state(
+    workflow_id: str,
+    state: dict[str, Any],
+    *,
+    vendor_names: dict[str, Vendor] | None = None,
+) -> list[VendorThreadRowDTO]:
+    vendor_names = vendor_names or {}
+    request = state.get(REQUEST_KEY) if isinstance(state.get(REQUEST_KEY), dict) else {}
+    request_id = str(_get(request, "request_id", "requestId", default=workflow_id))
+    created_at = _get(request, "created_at", "createdAt")
+    selected = state.get(SELECTED_VENDOR_KEY)
+    selected_vendor_id: str | None = None
+    if isinstance(selected, dict):
+        selected_vendor_id = str(_get(selected, "vendor", default="") or "") or None
+
+    overrides = _thread_overrides(state)
+    neg_config = state.get(NEGOTIATION_CONFIG_KEY)
+    if not isinstance(neg_config, dict):
+        return []
+
+    rows: list[VendorThreadRowDTO] = []
+    for vid, cfg in neg_config.items():
+        if not isinstance(cfg, dict):
+            continue
+        rfq_id = str(cfg.get("rfq_id") or "")
+        if not rfq_id:
+            continue
+        vendor_id = str(cfg.get("vendor_id") or vid)
+        vendor_doc = vendor_names.get(vendor_id)
+        comms = cfg.get("communications")
+        comms_list = comms if isinstance(comms, list) else []
+        latest = _latest_price_from_communications(comms_list)
+        round_val = cfg.get("round")
+        thread_status = infer_vendor_thread_status(
+            cfg,
+            selected_vendor_id=selected_vendor_id,
+            override=overrides.get(rfq_id),
+        )
+        state_label = to_state_label(thread_status)
+        done = bool(cfg.get("done")) or thread_status.name in {
+            "WALKED_AWAY",
+            "AWARDED",
+            "REJECTED",
+            "EXPIRED",
+        }
+
+        rows.append(
+            VendorThreadRowDTO(
+                id=rfq_id,
+                vendorId=vendor_id,
+                name=vendor_doc.name if vendor_doc else vendor_id,
+                country=_vendor_country(vendor_doc),
+                tier="Tier-2",
+                pr=request_id,
+                workflowId=workflow_id,
+                last=_format_relative(str(created_at) if created_at else None),
+                state=state_label,
+                unread=0,
+                msgs=len(comms_list),
+                round=int(round_val) if isinstance(round_val, int) else None,
+                latestPrice=latest,
+                done=done,
+            )
+        )
+    return rows
+
+
+def vendor_convo_from_state(
+    rfq_id: str,
+    state: dict[str, Any],
+    *,
+    workflow_id: str = "",
+    vendor_doc: Vendor | None = None,
+    events: list[WorkflowEventDoc] | None = None,
+) -> VendorConvoDTO:
+    vendor_id = str(state.get("vendor_id") or "")
+    status = str(state.get("status") or "UNKNOWN")
+
+    messages: list[VendorThreadMessageDTO] = []
+    if events:
+        for event in events:
+            if event.event_type not in {
+                "vendor_message_outbound",
+                "vendor_message_inbound",
+            }:
+                continue
+            payload = event.payload if isinstance(event.payload, dict) else {}
+            inner = payload.get("payload") if isinstance(payload.get("payload"), dict) else {}
+            from_agent = (
+                "buyer_agent"
+                if event.event_type == "vendor_message_outbound"
+                else "vendor_agent"
+            )
+            to_agent = (
+                "vendor_agent"
+                if event.event_type == "vendor_message_outbound"
+                else "buyer_agent"
+            )
+            ts = event.ts.strftime("%Y-%m-%d %H:%M:%S") if event.ts else ""
+            messages.append(
+                VendorThreadMessageDTO(
+                    ts=ts,
+                    **{"from": from_agent, "to": to_agent},
+                    type=str(payload.get("message_type") or inner.get("message_type") or "MSG"),
+                    phase=status,
+                    payload=inner if inner else payload,
+                )
+            )
+    else:
+        comms = state.get("communication")
+        comms_list = comms if isinstance(comms, list) else []
+        for entry in comms_list:
+            if not isinstance(entry, dict):
+                continue
+            ts = str(entry.get("timestamp") or "")
+            msg_type = str(entry.get("message_type") or entry.get("messageType") or "MSG")
+            from_agent = str(entry.get("from_agent") or entry.get("fromAgent") or "")
+            to_agent = str(entry.get("to_agent") or entry.get("toAgent") or "")
+            payload = entry.get("payload")
+            messages.append(
+                VendorThreadMessageDTO(
+                    ts=ts[:19].replace("T", " ") if ts else "",
+                    **{"from": from_agent, "to": to_agent},
+                    type=msg_type,
+                    phase=status,
+                    payload=payload if isinstance(payload, dict) else {},
+                )
+            )
+
+    outcome = status
+    if state.get("accepted_price"):
+        outcome = f"ACCEPTED @ {state['accepted_price']}"
+
+    return VendorConvoDTO(
+        vendor={
+            "id": vendor_id,
+            "name": vendor_doc.name if vendor_doc else vendor_id,
+            "country": _vendor_country(vendor_doc),
+            "tier": "Tier-2",
+            "mssa": "active",
+        },
+        pr=workflow_id or rfq_id,
+        workflowId=workflow_id,
+        rfqId=rfq_id,
+        outcome=outcome,
+        messages=messages,
+    )

@@ -1,11 +1,18 @@
-import React from 'react'
-import { FLOWS } from '@/lib/data'
-import { AsciiRule } from '@/components/primitives/AsciiRule'
+'use client'
+import React, { useCallback, useState } from 'react'
 import { FlowsTableWrapper } from './FlowsTableWrapper'
+import type { WorkflowRow } from '@/types/workflow'
+import { AsciiRule } from '@/components/primitives/AsciiRule'
 
 export default function FlowsPage() {
-  const total = FLOWS.length
-  const needsAction = FLOWS.filter((f) => f.needsAction).length
+  const [summary, setSummary] = useState({ total: 0, needsAction: 0 })
+
+  const handleLoaded = useCallback((rows: WorkflowRow[]) => {
+    setSummary({
+      total: rows.length,
+      needsAction: rows.filter((f) => f.needsAction).length,
+    })
+  }, [])
 
   return (
     <div className="viewport">
@@ -17,14 +24,15 @@ export default function FlowsPage() {
         <div>
           <h1 className="page-title">Flows</h1>
           <div className="page-sub">
-            All purchase requests across your org · {total} total · {needsAction} need action
+            All purchase requests across your org · {summary.total} total · {summary.needsAction}{' '}
+            need action
           </div>
         </div>
       </header>
 
       <AsciiRule />
 
-      <FlowsTableWrapper />
+      <FlowsTableWrapper onLoaded={handleLoaded} />
     </div>
   )
 }

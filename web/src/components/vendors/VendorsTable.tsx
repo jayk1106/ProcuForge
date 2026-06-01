@@ -1,7 +1,8 @@
 'use client'
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { VENDORS } from '@/lib/data'
+import { getVendorThreads } from '@/lib/api-client'
+import type { Vendor } from '@/types'
 import { FilterChip } from '@/components/primitives/FilterChip'
 import { StatusPill } from '@/components/primitives/StatusPill'
 import { PfSelect } from '@/components/primitives/PfSelect'
@@ -14,20 +15,39 @@ export function VendorsTable() {
   const [filter, setFilter] = useState<FilterKey>('all')
   const [query, setQuery] = useState('')
   const [groupBy, setGroupBy] = useState('state')
+  const [rows, setRows] = useState<Vendor[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      setRows(await getVendorThreads())
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load vendor threads')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    load()
+  }, [load])
 
   const counts = {
-    all: VENDORS.length,
-    unread: VENDORS.filter((v) => v.unread > 0).length,
-    escalated: VENDORS.filter(
+    all: rows.length,
+    unread: rows.filter((v) => v.unread > 0).length,
+    escalated: rows.filter(
       (v) => v.state === 'ESCALATED' || v.state.includes('DISPUTE')
     ).length,
-    closed: VENDORS.filter(
+    closed: rows.filter(
       (v) => v.state === 'CLOSED' || v.state === 'WALKED_AWAY'
     ).length,
   }
 
-  const rows = useMemo(() => {
-    let r = VENDORS.slice()
+  const filtered = useMemo(() => {
+    let r = rows.slice()
     if (filter === 'unread') r = r.filter((v) => v.unread > 0)
     if (filter === 'escalated')
       r = r.filter((v) => v.state === 'ESCALATED' || v.state.includes('DISPUTE'))
@@ -35,10 +55,32 @@ export function VendorsTable() {
       r = r.filter((v) => v.state === 'CLOSED' || v.state === 'WALKED_AWAY')
     if (query) {
       const q = query.toLowerCase()
-      r = r.filter((v) => (v.id + v.name + v.pr).toLowerCase().includes(q))
+      r = r.filter((v) =>
+        [v.vendorId, v.name, v.pr, v.id].join(' ').toLowerCase().includes(q)
+      )
     }
     return r
-  }, [filter, query])
+  }, [rows, filter, query])
+
+  if (loading) {
+    return (
+      <div className="empty" style={{ marginTop: 24 }}>
+        <div className="thinking">loading vendor threads…</div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="empty" style={{ marginTop: 24 }}>
+        <pre className="ascii-mark">──── error ────</pre>
+        <div>{error}</div>
+        <button className="btn" style={{ marginTop: 12 }} onClick={load}>
+          [ retry ]
+        </button>
+      </div>
+    )
+  }
 
   return (
     <>
@@ -79,6 +121,9 @@ export function VendorsTable() {
               onChange={(e) => setQuery(e.target.value)}
             />
           </div>
+          <button className="btn" onClick={load}>
+            [ refresh ]
+          </button>
           <PfSelect value={groupBy} onChange={(e) => setGroupBy(e.target.value)}>
             <option value="state">group: state</option>
             <option value="vendor">group: vendor</option>
@@ -87,11 +132,13 @@ export function VendorsTable() {
         </div>
       </div>
 
-      {rows.length === 0 ? (
+      {filtered.length === 0 ? (
         <div className="empty" style={{ marginTop: 24 }}>
           <pre className="ascii-mark">──── no vendor threads ────</pre>
           <div>
-            Nothing matches that filter. Vendor threads are created when an RFQ goes out.
+            {rows.length === 0
+              ? 'No vendor threads yet. Threads appear when negotiation starts.'
+              : 'Nothing matches that filter.'}
           </div>
         </div>
       ) : (
@@ -108,13 +155,13 @@ export function VendorsTable() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((v) => (
+            {filtered.map((v) => (
               <tr
                 key={v.id}
                 className={v.unread > 0 ? 'action-row' : ''}
                 onClick={() => router.push(`/vendors/${v.id}`)}
               >
-                <td className="tnum">{v.id}</td>
+                <td className="tnum">{v.vendorId ?? v.id.slice(0, 8)}</td>
                 <td>
                   <div>{v.name}</div>
                   <div className="t-xs faint">
@@ -125,7 +172,7 @@ export function VendorsTable() {
                   <a
                     onClick={(e) => {
                       e.stopPropagation()
-                      router.push(`/flows/${v.pr}`)
+                      router.push(`/flows/${v.workflowId ?? v.pr}`)
                     }}
                   >
                     {v.pr}

@@ -1,5 +1,5 @@
+'use client'
 import React from 'react'
-import { VENDORS } from '@/lib/data'
 import { AsciiRule } from '@/components/primitives/AsciiRule'
 import { VendorsTable } from '@/components/vendors/VendorsTable'
 
@@ -13,11 +13,8 @@ export default function VendorsPage() {
         <div>
           <h1 className="page-title">Vendor conversations</h1>
           <div className="page-sub">
-            All agent ↔ vendor communication, grouped by vendor entity · {VENDORS.length} active threads
+            All agent ↔ vendor communication, grouped by vendor entity
           </div>
-        </div>
-        <div className="row" style={{ gap: 6 }}>
-          <button className="btn">[ export transcripts ]</button>
         </div>
       </header>
       <AsciiRule />

@@ -1,5 +1,7 @@
 from google.adk.agents import Agent
 
+from adk_vertex_model import vertex_flash_model
+
 from .tools import get_negotiation_context, send_response
 
 from .callback import after_agent_callback
@@ -50,7 +52,7 @@ Rules:
 
 negotiation_agent = Agent(
     name="negotiation_agent",
-    model="gemini-flash-latest",
+    model=vertex_flash_model(),
     description="Handles counter-offers and confirmations anchored on last selling price.",
     instruction=NEGOTIATION_INSTRUCTION,
     tools=[get_negotiation_context, send_response],

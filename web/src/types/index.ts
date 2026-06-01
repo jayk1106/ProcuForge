@@ -30,6 +30,7 @@ export interface VendorThread {
 
 export interface ActiveVendor {
   id: string
+  rfqId?: string
   name: string
   country: string
   round: string
@@ -51,6 +52,7 @@ export interface ActivityItem {
 
 export interface ActiveFlow {
   id: string
+  requestId?: string
   title: string
   requester: string
   costCenter: string
@@ -58,10 +60,17 @@ export interface ActiveFlow {
   target: number
   needBy: string
   spec: string
+  prStatus?: string
   phaseDurations: Record<string, string | null>
   currentPhase: PhaseId
+  needsAction?: boolean
+  actionLabel?: string | null
   vendors: ActiveVendor[]
   activity: ActivityItem[]
+  po?: Record<string, unknown> | null
+  grn?: Record<string, unknown> | null
+  invoice?: Record<string, unknown> | null
+  selectedVendor?: Record<string, unknown> | null
 }
 
 export interface VendorConvoMessage {
@@ -84,12 +93,16 @@ export interface VendorConvo {
     mssa: string
   }
   pr: string
+  workflowId?: string
+  rfqId?: string
   outcome: string
   messages: VendorConvoMessage[]
 }
 
 export interface Vendor {
   id: string
+  vendorId?: string
+  workflowId?: string
   name: string
   country: string
   tier: string

@@ -20,8 +20,9 @@ function NegotiationStatus({ v }: { v: ActiveVendor }) {
 export function NegotiationBoard({ vendors }: NegotiationBoardProps) {
   const router = useRouter()
 
-  function openConvo(id: string) {
-    router.push(`/vendors/${id}`)
+  function openConvo(v: ActiveVendor) {
+    const target = v.rfqId ?? v.id
+    router.push(`/vendors/${target}`)
   }
 
   return (
@@ -86,7 +87,7 @@ export function NegotiationBoard({ vendors }: NegotiationBoardProps) {
               gap: 6,
             }}
           >
-            <button className="btn tiny" onClick={() => openConvo(v.id)}>
+            <button className="btn tiny" onClick={() => openConvo(v)}>
               [ open convo ]
             </button>
             {v.status === 'NEGOTIATING' && !v.escalated && (

@@ -20,7 +20,12 @@ VENDOR_DESCRIPTION = (
     "Vendor sales agent: issues quotes for RFQs, negotiates pricing, and "
     "handles purchase-order acknowledgement and invoicing."
 )
-VENDOR_EXTRA_PACKAGES = ["./procu_forge_vendor", "./communication", "./db"]
+VENDOR_EXTRA_PACKAGES = [
+    "./adk_vertex_model",
+    "./procu_forge_vendor",
+    "./communication",
+    "./db",
+]
 
 
 def main() -> None:

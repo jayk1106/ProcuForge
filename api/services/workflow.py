@@ -16,7 +16,10 @@ from api.schemas.workflow import (
     WorkflowStartResponse,
 )
 from db.collections.product import Product
+from db.collections.workflow_index import WorkflowIndexEntry
 from db.firestore.repositories.products import ProductRepository
+from db.firestore.repositories.workflow_index import WorkflowIndexRepository
+from procu_forge_buyer.pr_status import PrStatus
 
 logger = logging.getLogger(__name__)
 
@@ -41,9 +44,15 @@ class AgentJob:
 class WorkflowService:
     """Coordinates input validation, ADK session creation, and runner kickoff."""
 
-    def __init__(self, product_repo: ProductRepository, settings: APISettings) -> None:
+    def __init__(
+        self,
+        product_repo: ProductRepository,
+        settings: APISettings,
+        index_repo: WorkflowIndexRepository | None = None,
+    ) -> None:
         self._product_repo = product_repo
         self._settings = settings
+        self._index_repo = index_repo
 
     async def start(
         self, request: WorkflowStartRequest
@@ -53,10 +62,15 @@ class WorkflowService:
         product = await self._validate_product(request.product_id)
 
         workflow_id = str(uuid.uuid4())
-        user_id = self._settings.workflow_default_user_id
+        user_id = self._settings.workflow_default_user_id or ""
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="WORKFLOW_DEFAULT_USER_ID is not configured.",
+            )
         started_at = datetime.now(timezone.utc)
         organization_id = self._resolve_organization_id(request)
-        requester_id = (request.requester_id or self._settings.workflow_default_user_id).strip()
+        requester_id = (request.requester_id or user_id).strip()
         buyer_request = BuyerSessionRequestState.from_workflow_start(
             workflow_id=workflow_id,
             created_at=started_at,
@@ -66,6 +80,20 @@ class WorkflowService:
         )
 
         await self._create_session(workflow_id, user_id, buyer_request, product)
+
+        qty_label = f"{product.name} × {request.quantity}"
+        await self._write_index(
+            workflow_id=workflow_id,
+            request_id=buyer_request.request_id,
+            organization_id=organization_id,
+            product_id=product.id,
+            product_name=qty_label,
+            requester_id=requester_id,
+            pr_status=PrStatus.INITIATED.value,
+            started_at=started_at,
+            vendor_count=0,
+            needs_action=False,
+        )
 
         response = WorkflowStartResponse(
             workflow_id=workflow_id,
@@ -170,7 +198,12 @@ class WorkflowService:
             project=self._settings.vertex_project_id,
             location=self._settings.vertex_location,
         )
-        user_id = self._settings.workflow_default_user_id
+        user_id = self._settings.workflow_default_user_id or ""
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="WORKFLOW_DEFAULT_USER_ID is not configured.",
+            )
 
         session = await session_service.get_session(
             app_name=self._settings.reasoning_engine_app_name,
@@ -205,6 +238,15 @@ class WorkflowService:
         await session_service.append_event(session, state_event)
 
         approved_at = datetime.now(timezone.utc)
+        if self._index_repo is not None:
+            await self._index_repo.update_fields(
+                workflow_id,
+                {
+                    "prStatus": PrStatus.PO_ISSUED.value,
+                    "needsAction": False,
+                },
+            )
+
         logger.info(
             "workflow.approve  workflow_id=%s status=%s->PO_ISSUED",
             workflow_id, current_status,
@@ -303,3 +345,36 @@ class WorkflowService:
             "Use session state for all parameters (request, product); do not ask the user "
             "to repeat them unless something is missing from state."
         )
+
+    async def _write_index(
+        self,
+        *,
+        workflow_id: str,
+        request_id: str,
+        organization_id: str,
+        product_id: str,
+        product_name: str,
+        requester_id: str,
+        pr_status: str,
+        started_at: datetime,
+        vendor_count: int,
+        needs_action: bool,
+    ) -> None:
+        if self._index_repo is None:
+            return
+        now = datetime.now(timezone.utc)
+        entry = WorkflowIndexEntry(
+            id=workflow_id,
+            workflowId=workflow_id,
+            requestId=request_id,
+            organizationId=organization_id,
+            productId=product_id,
+            productName=product_name,
+            requesterId=requester_id,
+            prStatus=pr_status,
+            startedAt=started_at,
+            updatedAt=now,
+            vendorCount=vendor_count,
+            needsAction=needs_action,
+        )
+        await self._index_repo.upsert(entry)

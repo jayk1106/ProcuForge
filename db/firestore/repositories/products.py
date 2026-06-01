@@ -4,6 +4,7 @@ import asyncio
 from typing import Any
 
 from google.cloud import firestore
+from google.cloud.firestore_v1.base_query import FieldFilter
 
 from db.collections.product import COLLECTION_ID, Product
 from db.firestore.serialization import (
@@ -50,5 +51,39 @@ class ProductRepository:
                 return None
             payload = snapshot_to_model_dict(snap.id, snap.to_dict())
             return Product.model_validate(payload)
+
+        return await asyncio.to_thread(_op)
+
+    async def list_active(self, *, limit: int = 100) -> list[Product]:
+        """Return active catalog products (bounded scan).
+
+        Suitable for small catalogs; large catalogs need indexed search or an external engine.
+        """
+
+        def _op() -> list[Product]:
+            query = (
+                self._collection.where(filter=FieldFilter("active", "==", True)).limit(limit)
+            )
+            return [
+                Product.model_validate(snapshot_to_model_dict(s.id, s.to_dict()))
+                for s in query.stream()
+            ]
+
+        return await asyncio.to_thread(_op)
+
+    async def list_active(self, *, limit: int = 100) -> list[Product]:
+        """Return active catalog products (bounded scan).
+
+        Suitable for small catalogs; large catalogs need indexed search or an external engine.
+        """
+
+        def _op() -> list[Product]:
+            query = (
+                self._collection.where(filter=FieldFilter("active", "==", True)).limit(limit)
+            )
+            return [
+                Product.model_validate(snapshot_to_model_dict(s.id, s.to_dict()))
+                for s in query.stream()
+            ]
 
         return await asyncio.to_thread(_op)

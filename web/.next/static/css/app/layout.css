@@ -511,6 +511,12 @@ video {
 [hidden]:where(:not([hidden="until-found"])) {
   display: none;
 }
+.absolute{
+  position: absolute;
+}
+.relative{
+  position: relative;
+}
 .mx-auto{
   margin-left: auto;
   margin-right: auto;

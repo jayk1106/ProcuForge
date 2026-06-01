@@ -1,5 +1,7 @@
 from google.adk.agents import Agent
 
+from adk_vertex_model import vertex_flash_model
+
 from .callbacks import purchase_manager_after_agent
 from .tools import (
     approve_po,
@@ -40,7 +42,7 @@ purchase_manager_agent = Agent(
         "and PROCESS_COMPLETE to the vendor and advances pr_status accordingly."
     ),
     instruction=PURCHASE_MANAGER_INSTRUCTION,
-    model="gemini-flash-latest",
+    model=vertex_flash_model(),
     tools=[approve_po, send_po, send_grn_created, send_process_complete, send_rfq_closed_to_losing_vendors],
     after_agent_callback=purchase_manager_after_agent,
 )

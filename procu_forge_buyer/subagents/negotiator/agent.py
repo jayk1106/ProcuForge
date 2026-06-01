@@ -2,6 +2,8 @@ import os
 
 from dotenv import load_dotenv
 from google.adk.agents import Agent
+
+from adk_vertex_model import vertex_flash_model
 from google.adk.agents.remote_a2a_agent import AGENT_CARD_WELL_KNOWN_PATH, RemoteA2aAgent
 from google.adk.tools.agent_tool import AgentTool
 
@@ -141,7 +143,7 @@ finish those threads.
 
 negotiator_agent = Agent(
     name="negotiator_agent",
-    model="gemini-flash-latest",
+    model=vertex_flash_model(),
     description="Negotiates quotes with external vendors over the A2A protocol.",
     instruction=NEGOTIATOR_INSTRUCTION,
     tools=[negotiate_with_vendor],

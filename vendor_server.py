@@ -6,6 +6,13 @@ vendor agent accumulates context across all turns of a single negotiation thread
 (RFQ → counter-offer → accept / walk-away) instead of starting a fresh session
 on every A2A call.
 
+Event-log integration: vendor-side ``publish()`` is intentionally a no-op here.
+The vendor server runs as a separate process and cannot reach the FastAPI WS
+manager loop. Both directions of every A2A turn are already published from the
+buyer's ``negotiate_with_vendor`` tool (``vendor_message_outbound`` before the
+call, ``vendor_message_inbound`` after), so the durable event log captures the
+full conversation without duplication here.
+
 On the first RFQ for a new rfq_id the converter also seeds ``state_delta`` with
 the canonical vendor state structure so tools and the callback start with a
 complete skeleton from turn 1:

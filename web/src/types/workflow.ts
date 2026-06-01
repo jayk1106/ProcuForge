@@ -3,6 +3,7 @@ export type FilterTab = 'ALL' | 'IN_PROGRESS' | 'NEEDS_ACTION' | 'COMPLETED' | '
 
 export interface WorkflowRow {
   id: string
+  requestId?: string
   product: string
   requestedBy: string
   requestedAt: string
@@ -12,6 +13,7 @@ export interface WorkflowRow {
   days: number
   needsAction: boolean
   actionLabel: string | null
+  walked?: boolean
 }
 
 export interface WorkflowSummary {

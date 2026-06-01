@@ -1,6 +1,8 @@
 from dotenv import load_dotenv
 from google.adk.agents import Agent
 
+from adk_vertex_model import vertex_flash_model
+
 from procu_forge_vendor.callbacks import before_agent_callback
 from procu_forge_vendor.logging_config import configure_vendor_logging
 from procu_forge_vendor.subagents.negotiation import negotiation_agent
@@ -37,7 +39,7 @@ root_agent = Agent(
         "Vendor sales agent that issues quotes and negotiates pricing for procurement RFQs."
     ),
     instruction=ORCHESTRATOR_INSTRUCTION,
-    model="gemini-flash-latest",
+    model=vertex_flash_model(),
     sub_agents=[quote_agent, negotiation_agent, purchase_manager_agent],
     before_agent_callback=before_agent_callback,
 )

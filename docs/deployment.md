@@ -30,7 +30,7 @@ Configuration is read from the repo-root `.env` (loaded automatically) or the pr
 | `GOOGLE_CLOUD_PROJECT` | Yes | — | Target Google Cloud project. Falls back to `GOOGLE_PROJECT_ID`, then `gcloud` ADC default. |
 | `GOOGLE_CLOUD_LOCATION` | No | `us-central1` | Vertex AI region. Falls back to `GOOGLE_BUCKET_REGION`. |
 | `GOOGLE_CLOUD_STAGING_BUCKET` | **Yes** | — | Staging bucket for Agent Engine packaging. Name only (no `gs://`). **Not yet in `.env` — add it.** |
-| `MODEL` | No | `gemini-flash-latest` | Recorded in the config summary (the agents currently hardcode their model). |
+| `MODEL` | No | `gemini-2.5-flash` | Vertex publisher model id for all ADK agents (see `adk_vertex_model/`). |
 | `REQUIREMENTS_FILE` | No | `.requirements.txt` | Pinned dependency file shipped with the deployment. |
 | `GOOGLE_GENAI_USE_VERTEXAI` | Yes | — | Already `True` in `.env`; routes GenAI calls through Vertex. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | For local deploy | — | Path to a service-account key, or use ADC (`gcloud auth application-default login`). |

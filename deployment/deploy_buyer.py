@@ -21,7 +21,12 @@ BUYER_DESCRIPTION = (
     "decision, and purchase-order management as a loop until the request "
     "reaches a terminal or human-gated status."
 )
-BUYER_EXTRA_PACKAGES = ["./procu_forge_buyer", "./communication", "./db"]
+BUYER_EXTRA_PACKAGES = [
+    "./adk_vertex_model",
+    "./procu_forge_buyer",
+    "./communication",
+    "./db",
+]
 
 
 def main() -> None:

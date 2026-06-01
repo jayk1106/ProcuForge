@@ -1,49 +1,202 @@
 'use client'
-import React, { useState } from 'react'
+
+import React, { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { startWorkflow } from '@/lib/api-client'
 import { Field } from '@/components/primitives/Field'
 import { PfSelect } from '@/components/primitives/PfSelect'
+import { ProductPicker } from '@/components/primitives/ProductPicker'
 import { AsciiRule } from '@/components/primitives/AsciiRule'
+import type { ProductOption } from '@/types/product'
 
 interface PRModalProps {
   open: boolean
   onClose: () => void
 }
 
+type Urgency = 'low' | 'normal' | 'high' | 'emergency'
+
+interface DeliveryState {
+  address: string
+  city: string
+  state: string
+  country: string
+  pincode: string
+}
+
 interface FormState {
-  title: string
-  sku: string
-  qty: number
-  target: number
-  needBy: string
-  costCenter: string
-  spec: string
-  priority: string
-  region: string
-  payment: string
-  notes: string
+  productId: string
+  selectedProduct: ProductOption | null
+  quantity: number
+  purpose: string
+  requiredBy: string
+  urgency: Urgency
+  budgetCeiling: number
+  currency: string
+  delivery: DeliveryState
+  buyerNotes: string
+}
+
+function defaultNeedBy(): string {
+  return new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10)
+}
+
+function initialForm(): FormState {
+  return {
+    productId: '',
+    selectedProduct: null,
+    quantity: 1,
+    purpose: '',
+    requiredBy: defaultNeedBy(),
+    urgency: 'normal',
+    budgetCeiling: 0,
+    currency: 'USD',
+    delivery: {
+      address: '',
+      city: '',
+      state: '',
+      country: 'US',
+      pincode: '',
+    },
+    buyerNotes: '',
+  }
+}
+
+function suggestBudget(product: ProductOption, quantity: number): number {
+  return Math.ceil(product.estimatedPriceRange.max * quantity)
+}
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10)
 }
 
 export function PRModal({ open, onClose }: PRModalProps) {
+  const router = useRouter()
   const [step, setStep] = useState(1)
-  const [form, setForm] = useState<FormState>({
-    title: 'CNC spindle motors, 7.5kW',
-    sku: 'CNC-SPINDLE-7K5-IP65',
-    qty: 24,
-    target: 186400,
-    needBy: '2026-05-22',
-    costCenter: 'PROD-EAST-04',
-    spec: 'Siemens 1FK7-equivalent, IP65, water-cooled. Compatible with HAAS VF-2 retrofit.',
-    priority: 'standard',
-    region: 'NA + DE + JP',
-    payment: 'NET-30',
-    notes: '',
-  })
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [stepError, setStepError] = useState<string | null>(null)
+  const [form, setForm] = useState<FormState>(initialForm)
+
+  useEffect(() => {
+    if (!open) {
+      setStep(1)
+      setForm(initialForm())
+      setSubmitError(null)
+      setStepError(null)
+    }
+  }, [open])
 
   function set<K extends keyof FormState>(k: K, v: FormState[K]) {
     setForm((f) => ({ ...f, [k]: v }))
   }
 
+  function setDelivery<K extends keyof DeliveryState>(k: K, v: DeliveryState[K]) {
+    setForm((f) => ({ ...f, delivery: { ...f.delivery, [k]: v } }))
+  }
+
+  function handleProductChange(productId: string, product: ProductOption | null) {
+    setForm((f) => {
+      const next: FormState = { ...f, productId, selectedProduct: product }
+      if (product) {
+        next.currency = product.estimatedPriceRange.currency
+        next.budgetCeiling = suggestBudget(product, f.quantity > 0 ? f.quantity : 1)
+      }
+      return next
+    })
+  }
+
+  function handleQuantityChange(raw: number) {
+    const quantity = Number.isFinite(raw) && raw > 0 ? raw : 1
+    setForm((f) => {
+      const next = { ...f, quantity }
+      if (f.selectedProduct) {
+        next.budgetCeiling = suggestBudget(f.selectedProduct, quantity)
+      }
+      return next
+    })
+  }
+
+  function validateStep(targetStep: number): string | null {
+    if (targetStep >= 2) {
+      if (!form.productId || !form.selectedProduct) return 'Select a product.'
+      if (!Number.isFinite(form.quantity) || form.quantity <= 0) return 'Quantity must be greater than 0.'
+    }
+    if (targetStep >= 3) {
+      const d = form.delivery
+      if (!d.address.trim() || !d.city.trim() || !d.state.trim() || !d.country.trim() || !d.pincode.trim()) {
+        return 'Complete all delivery location fields.'
+      }
+      if (!form.requiredBy || form.requiredBy < todayIso()) {
+        return 'Need-by date must be today or later.'
+      }
+      if (!Number.isFinite(form.budgetCeiling) || form.budgetCeiling <= 0) {
+        return 'Budget ceiling must be greater than 0.'
+      }
+      if (!form.currency.trim() || form.currency.length !== 3) {
+        return 'Currency must be a 3-letter ISO code.'
+      }
+    }
+    return null
+  }
+
+  function goNext() {
+    const err = validateStep(step + 1)
+    if (err) {
+      setStepError(err)
+      return
+    }
+    setStepError(null)
+    setStep(step + 1)
+  }
+
+  async function handleSubmit() {
+    const err = validateStep(3)
+    if (err) {
+      setStepError(err)
+      return
+    }
+    setSubmitting(true)
+    setSubmitError(null)
+    setStepError(null)
+    try {
+      const purpose = form.purpose.trim()
+      const notes = form.buyerNotes.trim()
+      const result = await startWorkflow({
+        product_id: form.productId,
+        quantity: form.quantity,
+        required_by: form.requiredBy,
+        delivery_location: {
+          address: form.delivery.address.trim(),
+          city: form.delivery.city.trim(),
+          state: form.delivery.state.trim(),
+          country: form.delivery.country.trim(),
+          pincode: form.delivery.pincode.trim(),
+        },
+        urgency: form.urgency,
+        budget_ceiling: form.budgetCeiling,
+        currency: form.currency.trim().toUpperCase(),
+        purpose: purpose || undefined,
+        buyer_notes: notes ? [notes] : undefined,
+      })
+      onClose()
+      router.push(`/flows/${result.workflow_id}`)
+    } catch (e) {
+      setSubmitError(e instanceof Error ? e.message : 'Failed to start workflow')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   if (!open) return null
+
+  const product = form.selectedProduct
+  const urgencyLabels: Record<Urgency, string> = {
+    low: 'low',
+    normal: 'normal',
+    high: 'high',
+    emergency: 'emergency',
+  }
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -52,121 +205,174 @@ export function PRModal({ open, onClose }: PRModalProps) {
           <div>
             <div className="t-xs upper muted">New purchase request</div>
             <div className="page-title" style={{ fontSize: 'var(--t-xl)', marginTop: 4 }}>
-              draft · <span className="tnum muted">PR-2026-0419</span>
+              Create request
             </div>
             <div className="t-sm muted" style={{ marginTop: 4 }}>
-              Once submitted, the IntakeAgent classifies and routes. Standard requests under $250k auto-approve.
+              Submit to start the buyer agent workflow for this procurement.
             </div>
           </div>
-          <button className="btn ghost" onClick={onClose}>
+          <button type="button" className="btn ghost" onClick={onClose}>
             [ × close ]
           </button>
         </div>
 
         <div className="row" style={{ gap: 6, fontSize: 'var(--t-xs)', color: 'var(--muted)', marginBottom: 18 }}>
-          <span className={step >= 1 ? 'ink' : ''}>① what</span>
+          <span className={step >= 1 ? 'ink' : ''}>① product</span>
           <span className="sep-dot">────</span>
-          <span className={step >= 2 ? 'ink' : ''}>② constraints</span>
+          <span className={step >= 2 ? 'ink' : ''}>② terms</span>
           <span className="sep-dot">────</span>
           <span className={step >= 3 ? 'ink' : ''}>③ review</span>
         </div>
 
         {step === 1 && (
           <div className="col" style={{ gap: 18 }}>
-            <Field label="Request title" required>
-              <input value={form.title} onChange={(e) => set('title', e.target.value)} />
+            <ProductPicker
+              value={form.productId}
+              selected={form.selectedProduct}
+              onChange={handleProductChange}
+            />
+            {product && (
+              <div className="box box-pad box-tint t-sm">
+                <div className="t-xs upper muted" style={{ marginBottom: 4 }}>
+                  Catalog description
+                </div>
+                {product.description}
+              </div>
+            )}
+            <Field label="Quantity" required>
+              <input
+                type="number"
+                min={1}
+                value={form.quantity}
+                onChange={(e) => handleQuantityChange(+e.target.value)}
+              />
             </Field>
-            <div className="row" style={{ gap: 14 }}>
-              <div style={{ flex: 2 }}>
-                <Field
-                  label="SKU / catalog ref"
-                  required
-                  hint="exact match preferred — agents will validate"
-                >
-                  <input value={form.sku} onChange={(e) => set('sku', e.target.value)} />
-                </Field>
-              </div>
-              <div style={{ flex: 1 }}>
-                <Field label="Quantity" required>
-                  <input
-                    type="number"
-                    value={form.qty}
-                    onChange={(e) => set('qty', +e.target.value)}
-                  />
-                </Field>
-              </div>
-            </div>
             <div className="field">
               <label>
-                Specification
+                Business purpose
                 <span className="opt">&nbsp;&nbsp;(optional)</span>
               </label>
               <div className="ctl tall">
                 <span className="br">[</span>
                 <textarea
-                  rows={4}
-                  value={form.spec}
-                  onChange={(e) => set('spec', e.target.value)}
-                  style={{ flex: 1, border: 0, outline: 0, background: 'transparent', fontFamily: 'inherit', fontSize: 'inherit', padding: '6px 0', resize: 'vertical', minHeight: 80 }}
+                  rows={3}
+                  placeholder="Why this purchase is needed…"
+                  value={form.purpose}
+                  onChange={(e) => set('purpose', e.target.value)}
+                  style={{
+                    flex: 1,
+                    border: 0,
+                    outline: 0,
+                    background: 'transparent',
+                    fontFamily: 'inherit',
+                    fontSize: 'inherit',
+                    padding: '6px 0',
+                    resize: 'vertical',
+                    minHeight: 60,
+                  }}
                 />
                 <span className="br">]</span>
               </div>
-              <span className="hint">markdown ok · attachments via drag &amp; drop</span>
             </div>
           </div>
         )}
 
         {step === 2 && (
           <div className="col" style={{ gap: 18 }}>
+            <div className="t-xs upper muted">Delivery location</div>
+            <Field label="Address" required>
+              <input
+                value={form.delivery.address}
+                onChange={(e) => setDelivery('address', e.target.value)}
+              />
+            </Field>
             <div className="row" style={{ gap: 14 }}>
               <div style={{ flex: 1 }}>
-                <Field label="Target total (USD)" required>
+                <Field label="City" required>
                   <input
-                    type="number"
-                    value={form.target}
-                    onChange={(e) => set('target', +e.target.value)}
+                    value={form.delivery.city}
+                    onChange={(e) => setDelivery('city', e.target.value)}
                   />
                 </Field>
               </div>
+              <div style={{ flex: 1 }}>
+                <Field label="State / region" required>
+                  <input
+                    value={form.delivery.state}
+                    onChange={(e) => setDelivery('state', e.target.value)}
+                  />
+                </Field>
+              </div>
+            </div>
+            <div className="row" style={{ gap: 14 }}>
+              <div style={{ flex: 1 }}>
+                <Field label="Country" required hint="2+ letter code or full name">
+                  <input
+                    value={form.delivery.country}
+                    onChange={(e) => setDelivery('country', e.target.value)}
+                  />
+                </Field>
+              </div>
+              <div style={{ flex: 1 }}>
+                <Field label="Pincode / ZIP" required>
+                  <input
+                    value={form.delivery.pincode}
+                    onChange={(e) => setDelivery('pincode', e.target.value)}
+                  />
+                </Field>
+              </div>
+            </div>
+
+            <AsciiRule />
+
+            <div className="row" style={{ gap: 14 }}>
+              <div style={{ flex: 1 }}>
+                <Field label="Budget ceiling" required>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={form.budgetCeiling || ''}
+                    onChange={(e) => set('budgetCeiling', +e.target.value)}
+                  />
+                </Field>
+              </div>
+              <div style={{ flex: 1 }}>
+                <Field label="Currency" required hint="ISO 4217, e.g. USD">
+                  <input
+                    value={form.currency}
+                    maxLength={3}
+                    onChange={(e) => set('currency', e.target.value.toUpperCase())}
+                  />
+                </Field>
+              </div>
+            </div>
+            <div className="row" style={{ gap: 14 }}>
               <div style={{ flex: 1 }}>
                 <Field label="Need by" required>
                   <input
                     type="date"
-                    value={form.needBy}
-                    onChange={(e) => set('needBy', e.target.value)}
+                    min={todayIso()}
+                    value={form.requiredBy}
+                    onChange={(e) => set('requiredBy', e.target.value)}
                   />
                 </Field>
               </div>
-            </div>
-            <div className="row" style={{ gap: 14 }}>
               <div style={{ flex: 1 }}>
                 <label className="t-xs upper muted">
-                  Priority <span className="req">*</span>
+                  Urgency <span className="req">*</span>
                 </label>
-                <PfSelect value={form.priority} onChange={(e) => set('priority', e.target.value)}>
-                  <option value="standard">standard</option>
-                  <option value="expedited">expedited (+8% budget)</option>
-                  <option value="critical">critical (line down)</option>
-                </PfSelect>
-              </div>
-              <div style={{ flex: 1 }}>
-                <label className="t-xs upper muted">
-                  Payment terms <span className="req">*</span>
-                </label>
-                <PfSelect value={form.payment} onChange={(e) => set('payment', e.target.value)}>
-                  <option>NET-30</option>
-                  <option>NET-45</option>
-                  <option>NET-60</option>
-                  <option>2/10 NET-30</option>
+                <PfSelect
+                  value={form.urgency}
+                  onChange={(e) => set('urgency', e.target.value as Urgency)}
+                >
+                  <option value="low">low</option>
+                  <option value="normal">normal</option>
+                  <option value="high">high</option>
+                  <option value="emergency">emergency</option>
                 </PfSelect>
               </div>
             </div>
-            <Field label="Cost center" required>
-              <input value={form.costCenter} onChange={(e) => set('costCenter', e.target.value)} />
-            </Field>
-            <Field label="Vendor sourcing region" optional>
-              <input value={form.region} onChange={(e) => set('region', e.target.value)} />
-            </Field>
             <div className="field">
               <label>
                 Notes for agents
@@ -176,10 +382,20 @@ export function PRModal({ open, onClose }: PRModalProps) {
                 <span className="br">[</span>
                 <textarea
                   rows={3}
-                  placeholder="any preferences, restrictions, or context the agents should know…"
-                  value={form.notes}
-                  onChange={(e) => set('notes', e.target.value)}
-                  style={{ flex: 1, border: 0, outline: 0, background: 'transparent', fontFamily: 'inherit', fontSize: 'inherit', padding: '6px 0', resize: 'vertical', minHeight: 60 }}
+                  placeholder="Preferences, restrictions, or context for agents…"
+                  value={form.buyerNotes}
+                  onChange={(e) => set('buyerNotes', e.target.value)}
+                  style={{
+                    flex: 1,
+                    border: 0,
+                    outline: 0,
+                    background: 'transparent',
+                    fontFamily: 'inherit',
+                    fontSize: 'inherit',
+                    padding: '6px 0',
+                    resize: 'vertical',
+                    minHeight: 60,
+                  }}
                 />
                 <span className="br">]</span>
               </div>
@@ -191,23 +407,37 @@ export function PRModal({ open, onClose }: PRModalProps) {
           <div className="col" style={{ gap: 14 }}>
             <div className="t-xs upper muted">Review &amp; submit</div>
             <div className="kv box box-pad box-tint">
-              <div className="k">Title</div><div className="v">{form.title}</div>
-              <div className="k">SKU</div><div className="v tnum">{form.sku}</div>
-              <div className="k">Quantity</div><div className="v tnum">{form.qty} units</div>
-              <div className="k">Target total</div><div className="v tnum">${form.target.toLocaleString()}</div>
-              <div className="k">Need by</div><div className="v tnum">{form.needBy}</div>
-              <div className="k">Priority</div><div className="v">{form.priority}</div>
-              <div className="k">Payment</div><div className="v">{form.payment}</div>
-              <div className="k">Cost center</div><div className="v">{form.costCenter}</div>
-              <div className="k">Region</div><div className="v">{form.region}</div>
-            </div>
-            <div className="box box-pad" style={{ background: 'var(--accent-soft)', borderColor: 'var(--accent)' }}>
-              <div className="t-xs upper accent" style={{ fontWeight: 600 }}>
-                auto-classification preview
+              <div className="k">Product</div>
+              <div className="v">
+                {product ? `${product.name} · ${product.brand}` : form.productId}
               </div>
-              <div className="t-sm" style={{ marginTop: 4 }}>
-                Class B · auto-approves · estimated 6 vendors in cohort · expected RFQ window 24h.
+              <div className="k">Quantity</div>
+              <div className="v tnum">{form.quantity}</div>
+              {form.purpose.trim() && (
+                <>
+                  <div className="k">Purpose</div>
+                  <div className="v">{form.purpose.trim()}</div>
+                </>
+              )}
+              <div className="k">Deliver to</div>
+              <div className="v">
+                {form.delivery.address}, {form.delivery.city}, {form.delivery.state}{' '}
+                {form.delivery.country} {form.delivery.pincode}
               </div>
+              <div className="k">Need by</div>
+              <div className="v tnum">{form.requiredBy}</div>
+              <div className="k">Urgency</div>
+              <div className="v">{urgencyLabels[form.urgency]}</div>
+              <div className="k">Budget ceiling</div>
+              <div className="v tnum">
+                {form.currency} {form.budgetCeiling.toLocaleString()}
+              </div>
+              {form.buyerNotes.trim() && (
+                <>
+                  <div className="k">Notes</div>
+                  <div className="v">{form.buyerNotes.trim()}</div>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -215,25 +445,35 @@ export function PRModal({ open, onClose }: PRModalProps) {
         <AsciiRule />
 
         <div className="row between" style={{ marginTop: 14 }}>
-          <span className="t-xs faint">draft saved · {new Date().toLocaleTimeString()}</span>
+          <span className="t-xs faint">step {step} of 3</span>
           <div className="row" style={{ gap: 6 }}>
             {step > 1 && (
-              <button className="btn" onClick={() => setStep(step - 1)}>
+              <button type="button" className="btn" onClick={() => { setStepError(null); setStep(step - 1) }}>
                 [ ← back ]
               </button>
             )}
             {step < 3 && (
-              <button className="btn primary" onClick={() => setStep(step + 1)}>
+              <button type="button" className="btn primary" onClick={goNext}>
                 [ next → ]
               </button>
             )}
             {step === 3 && (
-              <button className="btn accent" onClick={onClose}>
-                [ submit &amp; start agents ]
+              <button
+                type="button"
+                className="btn accent"
+                onClick={handleSubmit}
+                disabled={submitting}
+              >
+                [ {submitting ? 'starting…' : 'submit & start agents'} ]
               </button>
             )}
           </div>
         </div>
+        {(stepError || submitError) && (
+          <div className="t-sm accent" style={{ marginTop: 8 }}>
+            {stepError ?? submitError}
+          </div>
+        )}
       </div>
     </div>
   )

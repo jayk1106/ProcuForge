@@ -1,11 +1,39 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, status
+from typing import Annotated
 
-from api.dependencies import WorkflowServiceDep
+from fastapi import APIRouter, BackgroundTasks, Query, status
+
+from api.dependencies import VendorThreadQueryServiceDep, WorkflowQueryServiceDep, WorkflowServiceDep
+from api.schemas.ui_dto import VendorConvoDTO, VendorThreadRowDTO, WorkflowDetailDTO, WorkflowRowDTO
 from api.schemas.workflow import WorkflowApproveResponse, WorkflowStartRequest, WorkflowStartResponse
 
 router = APIRouter(prefix="/workflow", tags=["workflow"])
+
+
+@router.get(
+    "/list",
+    response_model=list[WorkflowRowDTO],
+    summary="List procurement workflows",
+)
+async def list_workflows(
+    service: WorkflowQueryServiceDep,
+    organization_id: str | None = Query(default=None, alias="organizationId"),
+) -> list[WorkflowRowDTO]:
+    return await service.list_workflows(organization_id)
+
+
+@router.get(
+    "/{workflow_id}",
+    response_model=WorkflowDetailDTO,
+    summary="Get workflow detail",
+    responses={404: {"description": "Workflow not found."}},
+)
+async def get_workflow(
+    workflow_id: str,
+    service: WorkflowQueryServiceDep,
+) -> WorkflowDetailDTO:
+    return await service.get_workflow(workflow_id)
 
 
 @router.post(

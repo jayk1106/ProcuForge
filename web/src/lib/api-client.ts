@@ -1,5 +1,6 @@
-import type { WorkflowRow, WorkflowSummary } from '@/types/workflow'
-import { mockWorkflows, mockSummary } from './mock-data'
+import type { ProductOption } from '@/types/product'
+import type { WorkflowRow } from '@/types/workflow'
+import type { ActiveFlow, Vendor, VendorConvo } from '@/types'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
 
@@ -12,65 +13,109 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
     },
   })
   if (!res.ok) {
-    throw new Error(`API error ${res.status}: ${res.statusText}`)
+    const body = await res.text().catch(() => '')
+    throw new Error(`API error ${res.status}: ${body || res.statusText}`)
   }
   return res.json() as Promise<T>
 }
 
-export async function getWorkflows(): Promise<WorkflowRow[]> {
-  try {
-    return await apiFetch<WorkflowRow[]>('/api/workflows')
-  } catch {
-    return mockWorkflows
-  }
+export async function searchProducts(q = '', limit = 20): Promise<ProductOption[]> {
+  const params = new URLSearchParams()
+  if (q.trim()) params.set('q', q.trim())
+  params.set('limit', String(limit))
+  const query = params.toString()
+  return apiFetch<ProductOption[]>(`/api/v1/products${query ? `?${query}` : ''}`)
 }
 
-export async function getWorkflow(id: string): Promise<WorkflowRow> {
-  try {
-    return await apiFetch<WorkflowRow>(`/api/workflows/${id}`)
-  } catch {
-    const found = mockWorkflows.find((w) => w.id === id)
-    if (!found) throw new Error(`Workflow ${id} not found`)
-    return found
-  }
+export async function getWorkflows(): Promise<WorkflowRow[]> {
+  return apiFetch<WorkflowRow[]>('/api/v1/workflow/list')
+}
+
+export async function getWorkflowDetail(id: string): Promise<ActiveFlow> {
+  return apiFetch<ActiveFlow>(`/api/v1/workflow/${id}`)
 }
 
 export interface StartWorkflowPayload {
-  productId: string
+  product_id: string
   quantity: number
-  requestedBy: string
+  required_by: string
+  delivery_location: {
+    address: string
+    city: string
+    state: string
+    country: string
+    pincode: string
+  }
+  urgency: 'low' | 'normal' | 'high' | 'emergency'
+  budget_ceiling: number
+  currency: string
+  purpose?: string
+  requester_id?: string
+  organization_id?: string
+  buyer_notes?: string[]
 }
 
 export interface StartWorkflowResult {
-  sessionId: string
+  workflow_id: string
+  session_id: string
   status: string
+  started_at: string
 }
 
 export async function startWorkflow(
   payload: StartWorkflowPayload
 ): Promise<StartWorkflowResult> {
-  try {
-    return await apiFetch<StartWorkflowResult>('/api/workflows', {
+  return apiFetch<StartWorkflowResult>('/api/v1/workflow/start', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function approveWorkflow(id: string): Promise<{ workflow_id: string; status: string }> {
+  return apiFetch<{ workflow_id: string; status: string }>(
+    `/api/v1/workflow/${id}/approve`,
+    { method: 'POST' }
+  )
+}
+
+export async function getVendorThreads(): Promise<Vendor[]> {
+  return apiFetch<Vendor[]>('/api/v1/vendor-threads')
+}
+
+export async function getVendorThread(rfqId: string): Promise<VendorConvo> {
+  return apiFetch<VendorConvo>(`/api/v1/vendor-threads/${rfqId}`)
+}
+
+export interface ThreadActionResponse {
+  rfq_id: string
+  workflow_id: string
+  vendor_id: string
+  status: string
+  applied_at: string
+}
+
+export async function escalateVendorThread(
+  rfqId: string,
+  reason?: string
+): Promise<ThreadActionResponse> {
+  return apiFetch<ThreadActionResponse>(
+    `/api/v1/vendor-threads/${rfqId}/escalate`,
+    {
       method: 'POST',
-      body: JSON.stringify(payload),
-    })
-  } catch {
-    return {
-      sessionId: `mock-${Date.now()}`,
-      status: 'INITIATED',
+      body: JSON.stringify({ reason: reason ?? null }),
     }
-  }
+  )
 }
 
-export async function approveWorkflow(id: string): Promise<{ ok: boolean }> {
-  try {
-    return await apiFetch<{ ok: boolean }>(`/api/workflows/${id}/approve`, {
+export async function walkAwayVendorThread(
+  rfqId: string,
+  reason?: string
+): Promise<ThreadActionResponse> {
+  return apiFetch<ThreadActionResponse>(
+    `/api/v1/vendor-threads/${rfqId}/walk-away`,
+    {
       method: 'POST',
-    })
-  } catch {
-    return { ok: true }
-  }
+      body: JSON.stringify({ reason: reason ?? null }),
+    }
+  )
 }
-
-export { mockSummary }
-export type { WorkflowSummary }

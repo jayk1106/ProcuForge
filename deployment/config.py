@@ -15,6 +15,8 @@ from pathlib import Path
 import google.auth
 import vertexai
 
+from adk_vertex_model import vertex_flash_model
+
 
 def load_environment_variables() -> None:
     """Load environment variables from the repo-root ``.env`` if present."""
@@ -127,7 +129,7 @@ def build_config(
             "Please run 'uv export --no-hashes > .requirements.txt' to generate it."
         )
 
-    model = os.environ.get("MODEL", "gemini-flash-latest")
+    model = vertex_flash_model()
 
     return DeploymentConfiguration(
         project=project_id,

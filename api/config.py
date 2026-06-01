@@ -78,15 +78,32 @@ class APISettings(BaseSettings):
             "(projects/{project}/locations/{location}/reasoningEngines/{id})."
         ),
     )
-    workflow_default_user_id: str = Field(
-        default="eb1a2fb8-898a-4350-9eb1-2f8d9f7c4f91",
+    vendor_reasoning_engine_app_name: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "VENDOR_REASONING_ENGINE",
+            "VENDOR_REASONING_ENGINE_APP_NAME",
+        ),
+        description=(
+            "Fully-qualified Vertex AI reasoning engine resource name for the vendor agent."
+        ),
+    )
+    workflow_default_user_id: str | None = Field(
+        default=None,
         validation_alias="WORKFLOW_DEFAULT_USER_ID",
-        description="Fallback ADK session user id until auth is wired.",
+        description=(
+            "Fallback ADK session user id until auth is wired. Optional in "
+            "development; required in non-development environments — enforce "
+            "in app lifespan."
+        ),
     )
     workflow_default_organization_id: str | None = Field(
-        default="1a15ffe3-e95c-49cf-b544-bc7df751922a",
+        default=None,
         validation_alias="WORKFLOW_DEFAULT_ORGANIZATION_ID",
-        description="Used when POST /workflow/start omits organization_id.",
+        description=(
+            "Used when POST /workflow/start omits organization_id. Optional "
+            "in development; required in non-development environments."
+        ),
     )
 
     @field_validator("cors_origins", mode="before")

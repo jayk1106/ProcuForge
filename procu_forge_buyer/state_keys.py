@@ -9,6 +9,12 @@ PREVIOUS_PR_STATUS_KEY = "previous_pr_status"
 SELECTED_VENDOR_KEY = "selected_vendor"
 NEGOTIATION_CONFIG_KEY = "negotiation_config"
 
+# Human-applied overrides per vendor thread, keyed by rfq_id.
+# Shape: { rfq_id: { "status": "ESCALATED" | "WALKED_AWAY", "reason": str, "ts": iso8601 } }
+# Layered on top of NEGOTIATION_CONFIG_KEY at read time so the agent's own
+# write path doesn't need to know about them.
+VENDOR_THREAD_OVERRIDES_KEY = "vendor_thread_overrides"
+
 # Post-negotiation purchase flow
 PO_KEY = "po"
 GRN_KEY = "grn"

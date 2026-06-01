@@ -1,5 +1,7 @@
 from google.adk.agents import Agent
 
+from adk_vertex_model import vertex_flash_model
+
 from .tools import select_vendor
 
 DECISION_INSTRUCTION = """
@@ -72,6 +74,6 @@ decision_agent = Agent(
     name="decision_agent",
     description="Selects the winning vendor from negotiation outcomes and stores the decision.",
     instruction=DECISION_INSTRUCTION,
-    model="gemini-flash-latest",
+    model=vertex_flash_model(),
     tools=[select_vendor],
 )

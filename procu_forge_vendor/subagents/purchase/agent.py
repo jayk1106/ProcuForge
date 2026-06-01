@@ -1,5 +1,7 @@
 from google.adk.agents import Agent
 
+from adk_vertex_model import vertex_flash_model
+
 from .callback import after_agent_callback
 from .tools import acknowledge_po, submit_invoice
 
@@ -24,7 +26,7 @@ Rules:
 
 purchase_manager_agent = Agent(
     name="purchase_manager_agent",
-    model="gemini-flash-latest",
+    model=vertex_flash_model(),
     description="Handles post-negotiation document flow: acknowledges purchase orders and submits invoices after GRN.",
     instruction=PURCHASE_INSTRUCTION,
     tools=[acknowledge_po, submit_invoice],

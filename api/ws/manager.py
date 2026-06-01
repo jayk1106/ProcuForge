@@ -1,7 +1,9 @@
 """Per-workflow WebSocket connection manager.
 
 Provides a process-wide singleton that:
-- Tracks active WebSocket connections grouped by ``workflow_id``.
+- Tracks active WebSocket connections grouped by a string channel key.
+  Workflow subscribers use the bare ``workflow_id`` as the key; vendor-thread
+  subscribers use ``vt:{rfq_id}`` (see :func:`vendor_thread_channel`).
 - Captures the FastAPI main asyncio loop at app startup so that publishes from
   any thread (e.g. ADK callbacks running inside ``BackgroundTasks``) can be
   bridged onto the loop via ``asyncio.run_coroutine_threadsafe``.
@@ -21,8 +23,16 @@ from .schema import WorkflowEvent
 logger = logging.getLogger(__name__)
 
 
+VENDOR_THREAD_CHANNEL_PREFIX = "vt:"
+
+
+def vendor_thread_channel(rfq_id: str) -> str:
+    """Channel key used for vendor-thread WS subscribers."""
+    return f"{VENDOR_THREAD_CHANNEL_PREFIX}{rfq_id}"
+
+
 class ConnectionManager:
-    """Tracks WebSocket subscribers keyed by ``workflow_id`` and fans out events."""
+    """Tracks WebSocket subscribers by channel key and fans out events."""
 
     def __init__(self) -> None:
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -38,37 +48,42 @@ class ConnectionManager:
     def is_ready(self) -> bool:
         return self._loop is not None
 
-    async def connect(self, workflow_id: str, ws: WebSocket) -> None:
+    async def connect(self, channel: str, ws: WebSocket) -> None:
         await ws.accept()
         async with self._lock:
-            self._connections[workflow_id].add(ws)
+            self._connections[channel].add(ws)
         logger.info(
-            "ws.connect workflow_id=%s subscribers=%s",
-            workflow_id,
-            len(self._connections[workflow_id]),
+            "ws.connect channel=%s subscribers=%s",
+            channel,
+            len(self._connections[channel]),
         )
 
-    async def disconnect(self, workflow_id: str, ws: WebSocket) -> None:
+    async def disconnect(self, channel: str, ws: WebSocket) -> None:
         async with self._lock:
-            sockets = self._connections.get(workflow_id)
+            sockets = self._connections.get(channel)
             if sockets is not None:
                 sockets.discard(ws)
                 if not sockets:
-                    self._connections.pop(workflow_id, None)
-        logger.info("ws.disconnect workflow_id=%s", workflow_id)
+                    self._connections.pop(channel, None)
+        logger.info("ws.disconnect channel=%s", channel)
 
     async def broadcast(self, event: WorkflowEvent) -> None:
-        """Serialize once and fan out to all subscribers of ``event.workflow_id``.
+        """Fan out an event to its workflow channel and (if set) vendor-thread channel."""
+        channels: list[str] = [event.workflow_id]
+        if event.vendor_thread_id:
+            channels.append(vendor_thread_channel(event.vendor_thread_id))
 
-        Dead sockets are removed silently.
-        """
+        payload = event.model_dump(mode="json")
+        for channel in channels:
+            await self._send_to_channel(channel, payload)
+
+    async def _send_to_channel(self, channel: str, payload: dict) -> None:
         async with self._lock:
-            sockets = list(self._connections.get(event.workflow_id, ()))
+            sockets = list(self._connections.get(channel, ()))
 
         if not sockets:
             return
 
-        payload = event.model_dump(mode="json")
         dead: list[WebSocket] = []
         for ws in sockets:
             try:
@@ -78,15 +93,15 @@ class ConnectionManager:
 
         if dead:
             async with self._lock:
-                sockets_set = self._connections.get(event.workflow_id)
+                sockets_set = self._connections.get(channel)
                 if sockets_set is not None:
                     for ws in dead:
                         sockets_set.discard(ws)
                     if not sockets_set:
-                        self._connections.pop(event.workflow_id, None)
+                        self._connections.pop(channel, None)
             logger.debug(
-                "ws.broadcast.pruned_dead workflow_id=%s count=%s",
-                event.workflow_id,
+                "ws.broadcast.pruned_dead channel=%s count=%s",
+                channel,
                 len(dead),
             )
 

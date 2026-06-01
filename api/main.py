@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.config import APISettings, get_api_settings
 from api.logging_config import configure_app_logging
-from api.routers import health, test, workflow, ws as ws_router
+from api.routers import health, products, test, vendor_threads, workflow, ws as ws_router
 from api.ws import manager as ws_manager
 
 load_dotenv()
@@ -22,6 +22,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Capture the main event loop so sync publishers (ADK callbacks running
     # on BackgroundTasks worker threads) can bridge onto it safely.
     ws_manager.bind_loop(asyncio.get_running_loop())
+
+    settings = get_api_settings()
+    if settings.environment != "development":
+        missing: list[str] = []
+        if not settings.workflow_default_user_id:
+            missing.append("WORKFLOW_DEFAULT_USER_ID")
+        if not settings.workflow_default_organization_id:
+            missing.append("WORKFLOW_DEFAULT_ORGANIZATION_ID")
+        if missing:
+            raise RuntimeError(
+                "Missing required env vars for non-development environments: "
+                + ", ".join(missing)
+            )
+
     yield
     # Resource teardown goes here.
 
@@ -52,7 +66,9 @@ def create_app(settings: APISettings | None = None) -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(test.router, prefix=settings.api_v1_prefix)
+    app.include_router(products.router, prefix=settings.api_v1_prefix)
     app.include_router(workflow.router, prefix=settings.api_v1_prefix)
+    app.include_router(vendor_threads.router, prefix=settings.api_v1_prefix)
     app.include_router(ws_router.router)
 
     return app

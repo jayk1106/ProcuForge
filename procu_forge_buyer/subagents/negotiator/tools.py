@@ -9,6 +9,7 @@ from google.adk.tools.base_tool import ToolContext
 
 from communication import A2AMessageBuilder, MessageType
 from procu_forge_buyer.a2a_client import call_vendor as _call_vendor
+from procu_forge_buyer.event_hooks import publish_vendor_message, record_vendor_thread_initiated
 from procu_forge_buyer.state_keys import NEGOTIATION_CONFIG_KEY, VENDOR_OFFERS_KEY
 
 _LOG = logging.getLogger(__name__)
@@ -216,6 +217,13 @@ async def negotiate_with_vendor(
         nego[vendor_id] = config
         state[NEGOTIATION_CONFIG_KEY] = nego  # write-back so ADK persists the new rfq_id
 
+        await record_vendor_thread_initiated(
+            workflow_id=tool_context.session.id,
+            rfq_id=str(config["rfq_id"]),
+            vendor_id=vendor_id,
+            state=state,
+        )
+
     round = config.get("round")
     if message_type == MessageType.RFQ:
         round = 0
@@ -249,12 +257,23 @@ async def negotiate_with_vendor(
     _log_before_vendor_call(config, message_type, round, communication_payload)
     config["communications"].append(communication_payload)
 
+    publish_vendor_message(
+        workflow_id=tool_context.session.id,
+        rfq_id=str(config["rfq_id"]),
+        vendor_id=vendor_id,
+        direction="outbound",
+        message_type=str(message_type),
+        round_num=round,
+        payload=communication_payload,
+    )
+
     reply = await _call_vendor(
         message_json=json.dumps(communication_payload),
         rfq_id=config["rfq_id"],
     )
 
     config["round"] = round
+    parsed_reply: Any = None
     try:
         parsed_reply = json.loads(reply)
         config["communications"].append(parsed_reply if isinstance(parsed_reply, dict) else reply)
@@ -264,6 +283,17 @@ async def negotiate_with_vendor(
         config["done"] = True
     nego[vendor_id] = config
     state[NEGOTIATION_CONFIG_KEY] = nego  # write-back so ADK persists updated round + comms
+
+    inbound_payload = parsed_reply if isinstance(parsed_reply, dict) else {"text": reply}
+    publish_vendor_message(
+        workflow_id=tool_context.session.id,
+        rfq_id=str(config["rfq_id"]),
+        vendor_id=vendor_id,
+        direction="inbound",
+        message_type=str(inbound_payload.get("message_type") or ""),
+        round_num=round,
+        payload=inbound_payload,
+    )
 
     _log_after_vendor_call(config, round, reply)
 
