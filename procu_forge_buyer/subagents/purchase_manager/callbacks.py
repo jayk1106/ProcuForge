@@ -13,7 +13,7 @@ from ...pr_status_transitions import (
     transition_to_invoice_under_verification,
     transition_to_po_acknowledged,
 )
-from ...state_keys import GRN_KEY, INVOICE_KEY, PO_KEY, PR_STATUS_KEY, PROCESS_COMPLETE_KEY
+from ...state_keys import GRN_KEY, INVOICE_KEY, PO_KEY, PR_STATUS_KEY, PREVIOUS_PR_STATUS_KEY, PROCESS_COMPLETE_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +37,8 @@ def purchase_manager_after_agent(callback_context: CallbackContext) -> None:
         po = state.get(PO_KEY)
         if isinstance(po, dict) and po.get("po_number"):
             transition_to_po_acknowledged(state)
+        elif state.get(PREVIOUS_PR_STATUS_KEY) == PrStatus.AWAITING_USER_APPROVAL.value:
+            logger.info("purchase_manager: approve_po completed — PO will be sent next turn")
         else:
             logger.warning("purchase_manager: send_po did not produce a valid PO; staying at PO_ISSUED")
 

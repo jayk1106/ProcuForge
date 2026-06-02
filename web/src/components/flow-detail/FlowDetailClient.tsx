@@ -1,7 +1,7 @@
 'use client'
 import React, { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { approveWorkflow, getWorkflowDetail } from '@/lib/api-client'
+import { approveWorkflow, getWorkflowDetail, getWorkflowState } from '@/lib/api-client'
 import { fmtMoney } from '@/lib/format'
 import type { ActiveFlow } from '@/types'
 import { useChatContext } from '@/components/layout/ChatContext'
@@ -13,6 +13,7 @@ import { SidebarNav } from './SidebarNav'
 import { ActivityRail } from './ActivityRail'
 import { NegotiationBoard } from './NegotiationBoard'
 import { ActionBanner } from './ActionBanner'
+import { StateDebugPanel } from '@/components/primitives/StateDebugPanel'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
 
@@ -237,6 +238,11 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
 
         <ActivityRail items={flow.activity} />
       </div>
+
+      <StateDebugPanel
+        label="buyer session state"
+        fetchState={() => getWorkflowState(workflowId)}
+      />
 
       <div style={{ height: 80 }} />
     </div>

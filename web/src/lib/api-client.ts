@@ -78,6 +78,10 @@ export async function approveWorkflow(id: string): Promise<{ workflow_id: string
   )
 }
 
+export async function getWorkflowState(id: string): Promise<Record<string, unknown>> {
+  return apiFetch<Record<string, unknown>>(`/api/v1/workflow/${id}/state`)
+}
+
 export async function getVendorThreads(): Promise<Vendor[]> {
   return apiFetch<Vendor[]>('/api/v1/vendor-threads')
 }
@@ -92,6 +96,10 @@ export interface ThreadActionResponse {
   vendor_id: string
   status: string
   applied_at: string
+}
+
+export async function getVendorThreadState(rfqId: string): Promise<Record<string, unknown>> {
+  return apiFetch<Record<string, unknown>>(`/api/v1/vendor-threads/${rfqId}/state`)
 }
 
 export async function escalateVendorThread(

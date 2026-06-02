@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from functools import partial
 from typing import Any
 
@@ -25,7 +26,12 @@ from ...pr_status_transitions import (
     transition_after_negotiation,
     transition_to_negotiation_in_progress,
 )
-from ...state_keys import NEGOTIATION_CONFIG_KEY, PLANNER_PLAN_KEY
+from ...state_keys import (
+    NEGOTIATION_CONFIG_KEY,
+    NEGOTIATOR_COMMS_SNAPSHOT_KEY,
+    NEGOTIATOR_STALL_STREAK_KEY,
+    PLANNER_PLAN_KEY,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -109,16 +115,86 @@ log_negotiator_after_agent = partial(
 )
 
 
+def _comms_snapshot(state: dict[str, Any]) -> dict[str, int]:
+    """Return {vendor_id: len(communications)} for all targeted vendors."""
+    targeted = _targeted_vendor_ids(state)
+    nego = state.get(NEGOTIATION_CONFIG_KEY) or {}
+    return {
+        vid: len((nego.get(vid) or {}).get("communications") or [])
+        for vid in targeted
+    }
+
+
 def negotiator_before_agent_with_transition(callback_context: CallbackContext) -> None:
-    """Flip ``pr_status`` to ``NEGOTIATION_IN_PROGRESS`` then emit start span."""
-    transition_to_negotiation_in_progress(callback_context.state)
+    """Flip ``pr_status`` to ``NEGOTIATION_IN_PROGRESS``, snapshot comms, then emit start span."""
+    state = callback_context.state
+    transition_to_negotiation_in_progress(state)
+    state[NEGOTIATOR_COMMS_SNAPSHOT_KEY] = _comms_snapshot(state)
     log_negotiator_before_agent(callback_context)
     return None
 
 
+def _force_close_stalled_vendors(
+    callback_context: CallbackContext,
+    targeted: list[str],
+    streak: int,
+) -> None:
+    """Force-walkaway all not-done vendors when the stall guard fires."""
+    state = callback_context.state
+    nego: dict[str, Any] = dict(state.get(NEGOTIATION_CONFIG_KEY) or {})
+    not_done = [
+        vid
+        for vid in targeted
+        if not (isinstance(nego.get(vid), dict) and nego[vid].get("done"))
+    ]
+    if not not_done:
+        return
+    logger.warning(
+        "negotiator_stall_force_close session_id=%s stall_streak=%d vendors=%s",
+        callback_context.session.id,
+        streak,
+        ",".join(not_done),
+    )
+    ts = datetime.now(timezone.utc).isoformat()
+    for vid in not_done:
+        config: dict[str, Any] = dict(nego.get(vid) or {})
+        comms: list[Any] = list(config.get("communications") or [])
+        comms.append({
+            "message_type": "WALKAWAY",
+            "from_agent": "buyer_negotiator",
+            "vendor_id": vid,
+            "round": config.get("round"),
+            "timestamp": ts,
+            "payload": {"reason": "BUYER_CANCELLED", "note": "force_closed_by_stall_guard"},
+        })
+        config["communications"] = comms
+        config["done"] = True
+        nego[vid] = config
+    state[NEGOTIATION_CONFIG_KEY] = nego
+
+
 def negotiator_after_agent_with_transition(callback_context: CallbackContext) -> None:
-    """Advance ``pr_status`` after negotiation, then emit the NEGOTIATOR end span."""
-    transition_after_negotiation(callback_context.state)
+    """Detect stalls, optionally force-close, advance ``pr_status``, then emit end span."""
+    state = callback_context.state
+    targeted = _targeted_vendor_ids(state)
+
+    # Compare current comms lengths to the snapshot taken before this turn.
+    snapshot = state.get(NEGOTIATOR_COMMS_SNAPSHOT_KEY) or {}
+    nego = state.get(NEGOTIATION_CONFIG_KEY) or {}
+    progress = any(
+        len((nego.get(vid) or {}).get("communications") or []) > snapshot.get(vid, 0)
+        for vid in targeted
+    )
+
+    if progress:
+        state[NEGOTIATOR_STALL_STREAK_KEY] = 0
+    else:
+        streak: int = int(state.get(NEGOTIATOR_STALL_STREAK_KEY) or 0) + 1
+        state[NEGOTIATOR_STALL_STREAK_KEY] = streak
+        if streak >= 2:
+            _force_close_stalled_vendors(callback_context, targeted, streak)
+
+    transition_after_negotiation(state)
     log_negotiator_after_agent(callback_context)
     return None
 

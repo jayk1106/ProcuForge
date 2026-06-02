@@ -118,6 +118,30 @@ class VendorThreadQueryService:
             events=events,
         )
 
+    async def get_thread_state(self, rfq_id: str) -> dict:
+        """Return raw vendor and buyer session state for debugging."""
+        self._ensure_configured()
+
+        workflow_id, vendor_id = await self._resolve_rfq(rfq_id)
+
+        vendor_state: dict = {}
+        if vendor_id:
+            vsession = await self._vendor_reader.get_session(rfq_id, vendor_id)
+            if vsession is not None:
+                vendor_state = vsession.state if isinstance(vsession.state, dict) else {}
+
+        buyer_state: dict = {}
+        if workflow_id:
+            bsession = await self._buyer_reader.get_session(workflow_id)
+            if bsession is not None:
+                buyer_state = bsession.state if isinstance(bsession.state, dict) else {}
+
+        return {
+            "vendor_session_state": vendor_state,
+            "buyer_session_state": buyer_state,
+            "resolved": {"workflow_id": workflow_id, "vendor_id": vendor_id, "rfq_id": rfq_id},
+        }
+
     async def escalate(self, rfq_id: str, reason: str | None = None) -> dict:
         return await self._apply_override(
             rfq_id,

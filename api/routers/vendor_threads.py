@@ -34,6 +34,17 @@ async def list_vendor_threads(
 
 
 @router.get(
+    "/{rfq_id}/state",
+    summary="Get raw vendor + buyer session state for debugging",
+)
+async def get_vendor_thread_state(
+    rfq_id: str,
+    service: VendorThreadQueryServiceDep,
+) -> dict:
+    return await service.get_thread_state(rfq_id)
+
+
+@router.get(
     "/{rfq_id}",
     response_model=VendorConvoDTO,
     summary="Get vendor thread detail by rfq_id",

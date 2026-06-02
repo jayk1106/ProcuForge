@@ -260,8 +260,24 @@ async def send_grn_created(tool_context: ToolContext) -> dict[str, Any]:
                 grn_number, received_grn_ref,
             )
         tool_context.state[INVOICE_KEY] = invoice_payload
+    else:
+        synthetic_invoice_number = f"INV-{uuid.uuid4().hex[:8].upper()}"
+        _LOG.warning(
+            "purchase_manager send_grn  vendor reply was not parseable JSON; "
+            "using synthetic invoice  vendor_id=%s invoice_number=%s reply_preview=%r",
+            vendor_id,
+            synthetic_invoice_number,
+            reply[:200] if isinstance(reply, str) else type(reply).__name__,
+        )
+        tool_context.state[INVOICE_KEY] = {
+            "invoice_number": synthetic_invoice_number,
+            "po_number": po_number,
+            "grn_number": grn_number,
+            "note": "synthetic — vendor reply could not be parsed as JSON",
+        }
 
-    return {"ok": True, "grn_sent": envelope, "invoice_received": invoice or reply}
+    invoice_payload = tool_context.state[INVOICE_KEY]
+    return {"ok": True, "grn_sent": envelope, "invoice_received": invoice_payload}
 
 
 async def send_process_complete(tool_context: ToolContext) -> dict[str, Any]:

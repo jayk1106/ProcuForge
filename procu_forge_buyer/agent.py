@@ -49,10 +49,8 @@ Authoritative lifecycle: **docs/request_status.md**.
 - **NEGOTIATION_COMPLETED** — **transfer_to_agent** ``decision_agent`` (required next step after negotiation).
 - **NO_VENDOR_AVAILABLE** — Do not delegate; terminal.
 - **VENDOR_SELECTED** — **transfer_to_agent** ``purchase_manager_agent``.
-- **AWAITING_USER_APPROVAL** — The buyer's selection summary has been shown and a PO
-  approval is pending. **transfer_to_agent** ``purchase_manager_agent`` so it can call
-  **approve_po** and advance to **PO_ISSUED**. (The loop paused after the first
-  selection summary; this turn runs only after the human sends a follow-up message.)
+- **AWAITING_USER_APPROVAL** — **transfer_to_agent** ``purchase_manager_agent`` so it
+  can call **approve_po** and advance to **PO_ISSUED**.
 - **PO_ISSUED**, **PO_ACKNOWLEDGED**, **INVOICE_UNDER_VERIFICATION** — **transfer_to_agent**
   ``purchase_manager_agent``.
 - **AWAITING_DELIVERY**, **GOODS_RECEIVED**, **AWAITING_INVOICE**,

@@ -24,6 +24,22 @@ async def list_workflows(
 
 
 @router.get(
+    "/{workflow_id}/state",
+    summary="Get raw buyer session state for debugging",
+    responses={404: {"description": "Workflow not found."}},
+)
+async def get_workflow_state(
+    workflow_id: str,
+    service: WorkflowQueryServiceDep,
+) -> dict:
+    state = await service.get_workflow_state(workflow_id)
+    if not state:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=f"Workflow '{workflow_id}' not found.")
+    return state
+
+
+@router.get(
     "/{workflow_id}",
     response_model=WorkflowDetailDTO,
     summary="Get workflow detail",

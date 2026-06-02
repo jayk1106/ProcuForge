@@ -24,3 +24,10 @@ PROCESS_COMPLETE_KEY = "process_complete"
 # Human-approval gate: True once the AWAITING_USER_APPROVAL summary has been shown,
 # allowing the next loop iteration to process the user's approval message.
 PO_APPROVAL_SHOWN_KEY = "po_approval_shown"
+
+# Negotiator stall detection: snapshot of per-vendor communications lengths taken at
+# the start of each negotiator turn; compared in the after-callback to detect no-progress turns.
+NEGOTIATOR_COMMS_SNAPSHOT_KEY = "negotiator_comms_snapshot"
+# Count of consecutive negotiator turns that produced no new communications.
+# Resets to 0 on any turn that makes progress. Used for the stall-guard force-close.
+NEGOTIATOR_STALL_STREAK_KEY = "negotiator_stall_streak"

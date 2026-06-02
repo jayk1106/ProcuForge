@@ -29,7 +29,8 @@ TERMINAL_PR_STATUSES: frozenset[PrStatus] = frozenset(
 HUMAN_GATED_PR_STATUSES: frozenset[PrStatus] = frozenset(
     {
         PrStatus.ESCALATED,
-        PrStatus.AWAITING_USER_APPROVAL,
+        # PrStatus.AWAITING_USER_APPROVAL removed for automated happy-path testing.
+        # Add it back (with po_approval_shown gate logic) when re-introducing HITL.
         PrStatus.READY_FOR_PAYMENT,
         # Vendor-driven or external-trigger states: stop the loop, require API action to resume
         PrStatus.AWAITING_DELIVERY,

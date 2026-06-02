@@ -4,10 +4,12 @@ import { useRouter } from 'next/navigation'
 import {
   escalateVendorThread,
   getVendorThread,
+  getVendorThreadState,
   walkAwayVendorThread,
 } from '@/lib/api-client'
 import type { VendorConvo } from '@/types'
 import { AsciiRule } from '@/components/primitives/AsciiRule'
+import { StateDebugPanel } from '@/components/primitives/StateDebugPanel'
 import { Bracketed } from '@/components/primitives/Bracketed'
 import { FilterChip } from '@/components/primitives/FilterChip'
 import { StatusPill } from '@/components/primitives/StatusPill'
@@ -269,6 +271,14 @@ export function VendorDetailClient({ rfqId }: VendorDetailClientProps) {
           ))
         )}
       </div>
+
+      <StateDebugPanel
+        label="vendor session state"
+        fetchState={async () => {
+          const result = await getVendorThreadState(rfqId)
+          return (result as Record<string, unknown>).vendor_session_state ?? result
+        }}
+      />
 
       <div style={{ height: 80 }} />
     </div>

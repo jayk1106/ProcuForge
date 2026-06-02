@@ -32,10 +32,9 @@ load_dotenv()
 
 NEGOTIATOR_INSTRUCTION = """# buyer_negotiator
 
-You negotiate prices with each vendor in `vendor_offers.offers` independently over A2A.
-Use the `negotiate_with_vendor` tool for **every** outbound message — the tool builds and
-validates the A2A envelope (message_id, rfq_id, round, timestamp, payload, etc.) for you.
-**Never** produce envelope JSON yourself.
+You negotiate prices with **every** vendor in `vendor_offers.offers` over A2A, working
+through **all** not-yet-done vendors in **each** agent turn.
+Use `negotiate_with_vendor` for every outbound message. Never produce envelope JSON yourself.
 
 ---
 
@@ -45,100 +44,124 @@ validates the A2A envelope (message_id, rfq_id, round, timestamp, payload, etc.)
 <vendor_offers>{vendor_offers?}</vendor_offers>
 <negotiation_config>{negotiation_config?}</negotiation_config>
 
-- `request` carries `product_id`, `quantity`, `currency`, `required_by_date`,
-  `budget_ceiling`, `urgency`, `delivery`, `buyer_notes`.
-- `vendor_offers.offers` is the candidate vendor list. Each offer's `vendorId` is the
-  `vendor_id` you pass to the tool. If `vendor_offers` carries `vendor_ids` (array) or a
-  single `vendor_id` / `vendor`, only negotiate those vendor ids.
-- `negotiation_config[<vendor_id>]` is the per-vendor resume state maintained by the tool.
-  Key fields to read each turn:
-  - `target_price` — buyer target unit price (seeded from the vendor's catalog `unitPrice`).
-  - `round` — last round number sent (`None` before RFQ, `0` after RFQ, then 1..3).
-  - `done` — `true` once you have sent `ACCEPT` or `WALKAWAY` for that vendor.
-  - `communications` — chronological log of outbound payloads and vendor replies.
+**`vendor_offers.offers`** — list of candidate vendors. Each offer's `vendorId` is the
+`vendor_id` you pass to the tool.
+
+**`request`** — carries `product_id`, `quantity`, `currency`, `required_by_date`,
+`budget_ceiling`, `urgency`, `delivery`, `buyer_notes`.
+
+**`negotiation_config[<vendor_id>]`** — per-vendor resume state maintained by the tool:
+- `done` — `true` once you have sent `ACCEPT` or `WALKAWAY` for that vendor.
+- `round` — last round of the **last buyer-sent** message (`None` before RFQ, `0` after RFQ,
+  then 1..3).
+- `target_price` — buyer's target unit price for this vendor.
+- `communications` — chronological list; each `negotiate_with_vendor` call appends **two**
+  entries: the buyer's outbound message (even index) and the vendor's reply (odd index /
+  `communications[-1]`). **On re-entry turns, read the vendor's last reply from
+  `communications[-1]` — the tool's `vendor_reply` return value is only valid for the
+  current call.**
 
 ---
 
-## Tool contract: `negotiate_with_vendor` (exactly one vendor per call)
+## Algorithm for each turn
+
+Execute the following loop. You **must** call `negotiate_with_vendor` for **every** not-done
+vendor before finishing your turn.
+
+```
+for each offer in vendor_offers.offers:
+    vendor_id = offer.vendorId
+
+    # Skip vendors already closed
+    if negotiation_config[vendor_id].done == true:
+        continue
+
+    # Determine next move
+    if negotiation_config[vendor_id] is missing OR communications is empty:
+        next_move = RFQ
+
+    else:
+        last = negotiation_config[vendor_id].communications[-1]  # vendor's last reply
+
+        # Guard: if last entry is buyer-outbound (message_type in RFQ/COUNTER_OFFER/ACCEPT/WALKAWAY)
+        # and done is still false, skip this vendor this turn.
+        if last.message_type in {RFQ, COUNTER_OFFER, ACCEPT, WALKAWAY}:
+            continue
+
+        vendor_price  = last.payload.unit_price OR last.payload.proposed_unit_price
+        is_final      = last.payload.is_final (default false)
+        decision      = last.payload.decision  # only on COUNTER_RESPONSE: COUNTER | HOLD | REJECT
+        target_price  = negotiation_config[vendor_id].target_price
+        round         = negotiation_config[vendor_id].round
+
+        # Edge cases (check first)
+        if last.payload.response_deadline is in the past:
+            next_move = WALKAWAY(QUOTE_EXPIRED)
+        elif last.payload.currency != request.currency:
+            next_move = WALKAWAY(PRICE_GAP_TOO_LARGE)
+
+        # Decision rules (first match wins)
+        elif last_type == WALKAWAY:
+            next_move = WALKAWAY(VENDOR_REJECTED, price=vendor_price)
+        elif last_type == ACCEPT:
+            next_move = ACCEPT(vendor_price)
+        elif last_type == COUNTER_RESPONSE AND decision == REJECT:
+            next_move = WALKAWAY(VENDOR_REJECTED, price=vendor_price)
+        elif vendor_price <= target_price:
+            next_move = ACCEPT(vendor_price)
+        elif round >= 3 OR is_final == true:
+            next_move = WALKAWAY(MAX_ROUNDS_REACHED, price=vendor_price)
+        else:
+            next_move = COUNTER_OFFER(max(target_price, vendor_price * 0.92))
+
+    # Execute — one tool call per vendor
+    negotiate_with_vendor(communication_data={
+        "vendor_id": vendor_id,
+        "message_type": next_move,
+        "price": <required for COUNTER_OFFER and ACCEPT; optional last_offer for WALKAWAY>,
+        "walkaway_reason": <required only for WALKAWAY>,
+    })
+```
+
+**Do not emit any prose between tool calls.** The tool updates `negotiation_config`
+automatically after each call. Continue to the next vendor immediately after each call
+completes — do not wait or summarise between calls.
+
+---
+
+## Tool contract: `negotiate_with_vendor`
 
 Arguments (pass as `communication_data`):
-
-- `vendor_id` (**required**) — must match an `offer.vendorId` in `vendor_offers.offers`.
-- `message_type` (**required**) — one of `RFQ`, `COUNTER_OFFER`, `ACCEPT`, `WALKAWAY`.
-- `price` — **required** unit price for `COUNTER_OFFER` and `ACCEPT`.
-  Optional `last_offer` numeric on `WALKAWAY` (pass via `price`).
-- `walkaway_reason` — **required** for `WALKAWAY`. Valid values:
-  `PRICE_GAP_TOO_LARGE`, `MAX_ROUNDS_REACHED`, `VENDOR_REJECTED`,
-  `BUYER_CANCELLED`, `QUOTE_EXPIRED`.
+- `vendor_id` — must match a `vendorId` in `vendor_offers.offers`.
+- `message_type` — one of `RFQ`, `COUNTER_OFFER`, `ACCEPT`, `WALKAWAY`.
+- `price` — **required** for `COUNTER_OFFER` / `ACCEPT`; optional last-offer for `WALKAWAY`.
+- `walkaway_reason` — **required** for `WALKAWAY`: `PRICE_GAP_TOO_LARGE`,
+  `MAX_ROUNDS_REACHED`, `VENDOR_REJECTED`, `BUYER_CANCELLED`, `QUOTE_EXPIRED`.
 
 Rules:
-
-- **Always** start a vendor with `message_type: RFQ` — the tool rejects any other type
-  until RFQ has been sent.
-- One vendor per call. Iterate vendors by issuing separate tool calls.
-- The tool returns `{ok, rfq_id, vendor_id, round, done, vendor_reply}`. Parse
-  `vendor_reply` (a JSON envelope string from the vendor) to read the vendor's
-  `message_type`, `payload.unit_price`, and `payload.is_final` before deciding the next
-  move.
-
----
-
-## Decision loop (per vendor, each turn)
-
-Let `vendor_unit_price` = `vendor_reply.payload.unit_price`,
-`target_price` = `negotiation_config[vendor_id].target_price`,
-`round` = `negotiation_config[vendor_id].round`.
-
-1. If `negotiation_config[vendor_id].done` is true → skip this vendor (the tool
-   will short-circuit if you call it anyway).
-2. If the vendor's last reply was `WALKAWAY` → you **MUST** send a closing
-   `WALKAWAY` back with `walkaway_reason: VENDOR_REJECTED` (pass the vendor's
-   last `unit_price` as `price`). This is what flips `done = true`; without it
-   the PR will sit in `NEGOTIATION_IN_PROGRESS` forever.
-3. If the vendor's last reply was `ACCEPT` → you **MUST** send a confirming
-   `ACCEPT` back at the vendor's `unit_price` to close the thread (this flips
-   `done = true`).
-4. If `vendor_unit_price <= target_price` → send `ACCEPT` at `vendor_unit_price`.
-5. Else if `round >= 3` **or** `vendor_reply.payload.is_final` is true →
-   send `WALKAWAY` with `walkaway_reason: MAX_ROUNDS_REACHED` (pass the last
-   `vendor_unit_price` as `price`).
-6. Else → send `COUNTER_OFFER` at `max(target_price, vendor_unit_price * 0.92)`
-   (never undercut the vendor by more than 8% in a single counter).
-
-Edge cases:
-
-- Vendor reply's `response_deadline` is already in the past →
-  `WALKAWAY` with `walkaway_reason: QUOTE_EXPIRED`.
-- Vendor never responds (tool returns empty `vendor_reply` or transport error) →
-  `WALKAWAY` with `walkaway_reason: VENDOR_REJECTED`.
-- Currency mismatch between `request.currency` and `vendor_reply.payload.currency` →
-  `WALKAWAY` with `walkaway_reason: PRICE_GAP_TOO_LARGE` (do not attempt conversion).
-
----
-
-## Turn budget & multi-vendor progress
-
-- Each turn, work through **every** targeted vendor that is not yet `done`.
-  Issue one `negotiate_with_vendor` call per vendor, then move to the next vendor.
-- Do not stop a turn early just because one vendor is still mid-round; only stop
-  when you have made one move for every not-yet-done vendor (or every targeted
-  vendor is `done`).
+- A vendor thread must start with `RFQ` — any other type before RFQ is rejected by the tool.
+- One vendor per call; call the tool separately for each vendor.
+- On `ok: false` in the tool response → send `WALKAWAY(VENDOR_REJECTED)` for that vendor in
+  the same turn to close the thread.
 
 ---
 
 ## Termination
 
-Only after every targeted vendor in `vendor_offers.offers` has
-`negotiation_config[vid].done == true` (i.e. you have sent a closing `ACCEPT` or
-`WALKAWAY` for each one via `negotiate_with_vendor`), emit a single short
-summary message listing per vendor: `vendor_id`, final outcome
-(`ACCEPTED` / `WALKED_AWAY`), last unit price, last round. Then stop. The
-workflow loop advances `pr_status` via the after-agent callback — do not call
-any other tool or agent.
+After the loop above, if **every** vendor in `vendor_offers.offers` has
+`negotiation_config[vendor_id].done == true`, emit a brief summary then stop:
 
-Never emit the summary while any targeted vendor still has `done == false`;
-the buyer workflow will resume this agent on the next loop iteration so you can
-finish those threads.
+```
+Negotiation complete.
+<vendor_id>: ACCEPTED at $<price> (round <N>)
+<vendor_id>: WALKED_AWAY — <reason>
+...
+```
+
+Do not call any tool after the summary. The workflow callback advances `pr_status` automatically.
+
+If any vendor is still not done after the loop (some were skipped via the guard), do **not**
+emit the summary — the outer loop will re-invoke you on the next iteration to finish them.
 """
 
 negotiator_agent = Agent(
