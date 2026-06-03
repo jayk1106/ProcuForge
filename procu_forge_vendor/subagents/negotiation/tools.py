@@ -75,7 +75,8 @@ def send_response(
         is_final: Mark this counter as the vendor's best-and-final offer.
         walkaway_reason: Human-readable reason string for WALKAWAY envelopes.
 
-    Returns the complete A2A envelope dict — return it exactly as your reply.
+    Returns ``{"ok": True, ...}`` on success (envelope queued for A2A delivery via
+    callback), or ``{"ok": False, "error": ...}`` on guard violations.
     """
     vendor_id: str = tool_context.state.get(VENDOR_ID_KEY) or ""
     rfq_id: str = tool_context.state.get(RFQ_ID_KEY) or ""
@@ -184,4 +185,8 @@ def send_response(
 
     tool_context.state["temp:response_body"] = envelope
 
-    return envelope
+    return {
+        "ok": True,
+        "message_type": envelope.get("message_type"),
+        "message_id": envelope.get("message_id"),
+    }

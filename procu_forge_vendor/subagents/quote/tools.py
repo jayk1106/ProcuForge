@@ -27,8 +27,8 @@ async def quote_product(tool_context: ToolContext) -> dict[str, Any]:
       - state["product"]["quantity"] -> requested units
       - state["product"]["currency"] -> preferred currency (fallback to DB record)
 
-    Returns a complete A2A QUOTE envelope dict, or ``{"ok": False, "error": ...}``.
-    The agent must forward this payload verbatim as its response.
+    Returns ``{"ok": True, ...}`` on success (envelope queued for A2A delivery via
+    callback), or ``{"ok": False, "error": ...}`` on failure.
     """
     vendor_id: str = tool_context.state.get(VENDOR_ID_KEY) or ""
     rfq_id: str = tool_context.state.get(RFQ_ID_KEY) or ""
@@ -97,4 +97,9 @@ async def quote_product(tool_context: ToolContext) -> dict[str, Any]:
     )
 
     tool_context.state["temp:response_body"] = envelope
-    return envelope
+
+    return {
+        "ok": True,
+        "message_type": envelope.get("message_type"),
+        "message_id": envelope.get("message_id"),
+    }

@@ -40,8 +40,8 @@ def acknowledge_po(tool_context: ToolContext) -> dict[str, Any]:
     (``{ "po_number": ... }``) and writes it to state["temp:response_body"]
     for the after_agent_callback to send.
 
-    Returns the complete PO_ACKNOWLEDGED envelope dict.
-    Return it exactly and completely as your reply.
+    Returns ``{"ok": True, ...}`` on success (envelope queued for A2A delivery via
+    callback), or ``{"ok": False, "error": ...}`` on failure.
     """
     if not tool_context.state.get(VENDOR_ID_KEY):
         return {"ok": False, "error": "vendor_id not found in session state"}
@@ -58,7 +58,11 @@ def acknowledge_po(tool_context: ToolContext) -> dict[str, Any]:
     envelope = builder.get_po_acknowledged_payload(po_number=po_number)
 
     tool_context.state["temp:response_body"] = envelope
-    return envelope
+    return {
+        "ok": True,
+        "message_type": envelope.get("message_type"),
+        "message_id": envelope.get("message_id"),
+    }
 
 
 def submit_invoice(tool_context: ToolContext) -> dict[str, Any]:
@@ -149,7 +153,11 @@ def submit_invoice(tool_context: ToolContext) -> dict[str, Any]:
     )
 
     tool_context.state["temp:response_body"] = envelope
-    return envelope
+    return {
+        "ok": True,
+        "message_type": envelope.get("message_type"),
+        "message_id": envelope.get("message_id"),
+    }
 
 
 __all__ = ["acknowledge_po", "submit_invoice"]

@@ -36,11 +36,13 @@ When you receive a buyer message, follow these steps:
 4. If **send_response** returns ``{"ok": false, "error": ...}``, the call
    violated a hard guard (e.g. ``floor_price_violation``, ``max_rounds_reached``,
    ``post_is_final_counter_rejected``). Read the ``hint`` field and call
-   **send_response** again with corrected arguments. Do not return the error
-   dict as your reply.
+   **send_response** again with corrected arguments. Reply with the error dict
+   verbatim only when you cannot recover after retries.
 
-5. Return the successful tool envelope **exactly and completely** as your
-   reply - do not summarise, reformat, or omit any fields.
+5. If **send_response** returns ``{"ok": true, ...}``, reply with a brief
+   confirmation only (e.g. "Acknowledged."). Do **not** repeat or reformat the
+   envelope — the after_agent_callback delivers it to the buyer over A2A
+   automatically.
 
 Rules:
 - Never go below listed_unit_price (the tool will reject you if you try).

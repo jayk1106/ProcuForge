@@ -267,10 +267,14 @@ async def negotiate_with_vendor(
         payload=communication_payload,
     )
 
+    print(f" BUYER:communication_payload: {communication_payload}")
+
     reply = await _call_vendor(
         message_json=json.dumps(communication_payload),
         rfq_id=config["rfq_id"],
     )
+
+    print(f" BUYER: reply: {reply}")
 
     config["round"] = round
     parsed_reply: Any = None

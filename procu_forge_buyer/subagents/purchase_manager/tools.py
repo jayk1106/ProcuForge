@@ -10,7 +10,7 @@ import json
 import logging
 import uuid
 from datetime import date, timedelta
-from typing import Any
+from typing import Any, Protocol
 
 from google.adk.tools.base_tool import ToolContext
 
@@ -30,6 +30,12 @@ from procu_forge_buyer.state_keys import (
 )
 
 _LOG = logging.getLogger(__name__)
+
+
+class _StateReader(Protocol):
+    """Minimal session-state interface (plain dict or ADK ``State``)."""
+
+    def get(self, key: str, default: Any = None) -> Any: ...
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -62,8 +68,12 @@ def _extract_agreed_price(communications: list[Any]) -> float | None:
     return None
 
 
-def _get_vendor_config(state: dict[str, Any]) -> tuple[str, dict[str, Any]] | str:
-    """Return (vendor_id, negotiation_config) or an error string."""
+def _get_vendor_config(state: _StateReader) -> tuple[str, dict[str, Any]] | str:
+    """Return (vendor_id, negotiation_config) or an error string.
+
+    Accepts ADK ``State`` or a plain dict. Never wrap ADK state in ``dict()`` —
+    that triggers ``KeyError`` because ``State`` is not iterable as a mapping.
+    """
     selected = state.get(SELECTED_VENDOR_KEY)
     if not isinstance(selected, dict):
         return "selected_vendor missing from state"
@@ -133,7 +143,7 @@ async def send_po(tool_context: ToolContext) -> dict[str, Any]:
     Stores the outbound PO envelope in state["po"].
     Returns the PO envelope and the vendor's PO_ACKNOWLEDGED response.
     """
-    result = _get_vendor_config(dict(tool_context.state))
+    result = _get_vendor_config(tool_context.state)
     if isinstance(result, str):
         return {"ok": False, "error": result}
     vendor_id, config = result
@@ -195,7 +205,20 @@ async def send_po(tool_context: ToolContext) -> dict[str, Any]:
         "vendor_id": vendor_id,
     }
 
-    reply = await call_vendor(json.dumps(envelope), config["rfq_id"])
+    try:
+        reply = await call_vendor(json.dumps(envelope), config["rfq_id"])
+    except Exception as exc:
+        _LOG.exception(
+            "purchase_manager send_po a2a_failed  vendor_id=%s rfq_id=%s",
+            vendor_id,
+            config["rfq_id"],
+        )
+        return {
+            "ok": False,
+            "error": f"vendor A2A call failed: {exc}",
+            "po_number": po_number,
+        }
+
     _LOG.info("purchase_manager po_reply  vendor_id=%s reply_chars=%d", vendor_id, len(reply))
 
     ack = _parse_vendor_reply(reply)
@@ -208,7 +231,7 @@ async def send_grn_created(tool_context: ToolContext) -> dict[str, Any]:
     Reads PO data from state["po"]. Stores the GRN envelope in state["grn"]
     and the vendor's invoice payload in state["invoice"].
     """
-    result = _get_vendor_config(dict(tool_context.state))
+    result = _get_vendor_config(tool_context.state)
     if isinstance(result, str):
         return {"ok": False, "error": result}
     vendor_id, config = result
@@ -247,7 +270,20 @@ async def send_grn_created(tool_context: ToolContext) -> dict[str, Any]:
         "line_items": grn_line_items,
     }
 
-    reply = await call_vendor(json.dumps(envelope), config["rfq_id"])
+    try:
+        reply = await call_vendor(json.dumps(envelope), config["rfq_id"])
+    except Exception as exc:
+        _LOG.exception(
+            "purchase_manager send_grn a2a_failed  vendor_id=%s rfq_id=%s",
+            vendor_id,
+            config["rfq_id"],
+        )
+        return {
+            "ok": False,
+            "error": f"vendor A2A call failed: {exc}",
+            "grn_number": grn_number,
+        }
+
     _LOG.info("purchase_manager grn_reply  vendor_id=%s reply_chars=%d", vendor_id, len(reply))
 
     invoice = _parse_vendor_reply(reply)
@@ -285,7 +321,7 @@ async def send_process_complete(tool_context: ToolContext) -> dict[str, Any]:
 
     Reads PO, GRN, and invoice data from state.
     """
-    result = _get_vendor_config(dict(tool_context.state))
+    result = _get_vendor_config(tool_context.state)
     if isinstance(result, str):
         return {"ok": False, "error": result}
     vendor_id, config = result
@@ -317,7 +353,16 @@ async def send_process_complete(tool_context: ToolContext) -> dict[str, Any]:
         vendor_id, po_number, grn_number, invoice_number,
     )
 
-    reply = await call_vendor(json.dumps(envelope), config["rfq_id"])
+    try:
+        reply = await call_vendor(json.dumps(envelope), config["rfq_id"])
+    except Exception as exc:
+        _LOG.exception(
+            "purchase_manager send_process_complete a2a_failed  vendor_id=%s rfq_id=%s",
+            vendor_id,
+            config["rfq_id"],
+        )
+        return {"ok": False, "error": f"vendor A2A call failed: {exc}"}
+
     _LOG.info(
         "purchase_manager process_complete_reply  vendor_id=%s reply_chars=%d",
         vendor_id, len(reply),

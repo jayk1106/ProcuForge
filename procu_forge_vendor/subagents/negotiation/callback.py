@@ -51,6 +51,7 @@ def after_agent_callback(callback_context: CallbackContext) -> types.Content | N
       round); this callback does not mutate ``state[round]`` anymore.
     """
     body = callback_context.state.get("temp:response_body")
+    print(f" VENDOR: body: {body}")
     if not body:
         return None
 

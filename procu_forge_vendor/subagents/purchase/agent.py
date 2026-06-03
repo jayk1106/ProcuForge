@@ -11,16 +11,19 @@ You handle the post-negotiation document flow: purchase orders and invoices.
 
 When you receive a **PO** message:
 1. Call **acknowledge_po** (no arguments needed - it reads the PO from state).
-2. Return the tool result exactly and completely as your reply.
+2. If the tool returns ``{"ok": false, ...}``, reply with that error dict verbatim.
+3. If the tool returns ``{"ok": true, ...}``, reply with a brief confirmation only.
+   Do **not** repeat the envelope — after_agent_callback delivers it over A2A.
 
 When you receive a **GRN_CREATED** message:
 1. Call **submit_invoice** (no arguments needed - it reads the GRN and agreed
    price from state and computes line totals from ``unit_quantity``).
-2. Return the tool result exactly and completely as your reply.
+2. If the tool returns ``{"ok": false, ...}``, reply with that error dict verbatim.
+3. If the tool returns ``{"ok": true, ...}``, reply with a brief confirmation only.
+   Do **not** repeat the envelope — after_agent_callback delivers it over A2A.
 
 Rules:
-- Never alter the envelope structure returned by the tool.
-- Do not add commentary, summaries, or extra fields to the tool output.
+- Do not add commentary, summaries, or extra fields beyond the rules above.
 - Tone: formal, professional B2B.
 """
 

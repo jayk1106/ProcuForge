@@ -12,6 +12,7 @@ from procu_forge_vendor.state_keys import COMMUNICATION_KEY, ROUND_KEY
 def after_agent_callback(callback_context: CallbackContext) -> types.Content | None:
     """Persist the outbound QUOTE envelope and advance status to QUOTE_SENT."""
     body = callback_context.state.get("temp:response_body")
+    print(f" VENDOR QUOTE: after_agent_callback: {body}")
     if body:
         communications = callback_context.state.get(COMMUNICATION_KEY) or []
         communications.append(body)
