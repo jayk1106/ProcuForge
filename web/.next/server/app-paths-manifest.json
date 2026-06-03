@@ -1,6 +1,0 @@
-{
-  "/vendors/[id]/page": "app/vendors/[id]/page.js",
-  "/vendors/page": "app/vendors/page.js",
-  "/flows/[id]/page": "app/flows/[id]/page.js",
-  "/flows/page": "app/flows/page.js"
-}
