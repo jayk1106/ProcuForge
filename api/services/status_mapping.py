@@ -126,3 +126,71 @@ def is_completed(status: PrStatus) -> bool:
 
 def is_in_progress(status: PrStatus) -> bool:
     return not is_completed(status) and not is_walked_away(status)
+
+
+PhaseStatus = str  # pending | in_progress | done | walked
+
+PHASE_ORDER: tuple[PhaseId, ...] = ("rfq", "neg", "po", "grn", "inv", "done")
+
+
+def phase_status_map(status: PrStatus) -> dict[PhaseId, PhaseStatus]:
+    """Return per-phase status for the timeline / sidebar.
+
+    Values: ``pending`` | ``in_progress`` | ``done`` | ``walked``.
+    Phases before the current phase are ``done``; the current phase is
+    ``in_progress``; phases after are ``pending``. Terminal/failure statuses
+    mark the failing phase ``walked``.
+    """
+    if status == PrStatus.COMPLETED:
+        return {p: "done" for p in PHASE_ORDER}
+
+    if status == PrStatus.NO_VENDORS_DISCOVERED:
+        result: dict[PhaseId, PhaseStatus] = {p: "pending" for p in PHASE_ORDER}
+        result["rfq"] = "walked"
+        return result
+
+    if status == PrStatus.NO_VENDOR_AVAILABLE:
+        result = {p: "pending" for p in PHASE_ORDER}
+        result["rfq"] = "done"
+        result["neg"] = "walked"
+        return result
+
+    if status == PrStatus.PO_REJECTED:
+        result = {p: "pending" for p in PHASE_ORDER}
+        result["rfq"] = "done"
+        result["neg"] = "done"
+        result["po"] = "walked"
+        return result
+
+    current = pr_status_to_phase_id(status)
+    if status == PrStatus.CANCELLED:
+        result = {}
+        passed = False
+        for p in PHASE_ORDER:
+            if p == current:
+                result[p] = "walked"
+                passed = True
+            elif not passed:
+                result[p] = "done"
+            else:
+                result[p] = "pending"
+        return result
+
+    result = {}
+    passed = False
+    for p in PHASE_ORDER:
+        if p == current:
+            result[p] = "in_progress"
+            passed = True
+        elif not passed:
+            result[p] = "done"
+        else:
+            result[p] = "pending"
+    return result
+
+
+def spec_done(status: PrStatus) -> bool:
+    """Specification (step 1.0 in the sidebar) is validated as soon as the
+    workflow has progressed past INITIATED.
+    """
+    return status != PrStatus.INITIATED

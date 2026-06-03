@@ -105,6 +105,8 @@ class WorkflowDetailDTO(BaseModel):
     spec: str
     pr_status: str = Field(alias="prStatus")
     phase_durations: dict[str, str | None] = Field(alias="phaseDurations")
+    phase_status: dict[str, str] = Field(default_factory=dict, alias="phaseStatus")
+    spec_done: bool = Field(default=True, alias="specDone")
     current_phase: str = Field(alias="currentPhase")
     needs_action: bool = Field(alias="needsAction")
     action_label: str | None = Field(default=None, alias="actionLabel")

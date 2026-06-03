@@ -1,9 +1,9 @@
 'use client'
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { approveWorkflow, getWorkflowDetail, getWorkflowState } from '@/lib/api-client'
 import { fmtMoney } from '@/lib/format'
-import type { ActiveFlow } from '@/types'
+import type { ActiveFlow, PhaseStatus } from '@/types'
 import { useChatContext } from '@/components/layout/ChatContext'
 import { StatusPill } from '@/components/primitives/StatusPill'
 import { Section } from '@/components/primitives/Section'
@@ -19,6 +19,31 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
 
 interface FlowDetailClientProps {
   workflowId: string
+}
+
+interface PhasePillSpec {
+  kind: 'ok' | 'go' | 'warn' | 'err' | 'idle'
+  text: string
+}
+
+function pillForStatus(
+  status: PhaseStatus | undefined,
+  labels: { done: string; inProgress: string; pending: string; walked?: string }
+): PhasePillSpec {
+  if (status === 'done') return { kind: 'ok', text: labels.done }
+  if (status === 'in_progress') return { kind: 'go', text: labels.inProgress }
+  if (status === 'walked') return { kind: 'err', text: labels.walked ?? 'walked away' }
+  return { kind: 'idle', text: labels.pending }
+}
+
+function selectedVendorName(flow: ActiveFlow): string | null {
+  const winner = flow.vendors.find((v) => v.status === 'WON')
+  if (winner) return winner.name
+  const sv = flow.selectedVendor
+  if (sv && typeof sv === 'object' && typeof (sv as Record<string, unknown>).vendor === 'string') {
+    return (sv as Record<string, string>).vendor
+  }
+  return null
 }
 
 export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
@@ -86,6 +111,27 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
     }
   }
 
+  const handlePickSection = useCallback((id: string) => {
+    setActiveSec(id)
+    if (typeof document !== 'undefined') {
+      const el = document.getElementById(`sec-${id}`)
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }, [])
+
+  const phaseStatus: Record<string, PhaseStatus> = useMemo(
+    () =>
+      flow?.phaseStatus ?? {
+        rfq: 'pending',
+        neg: 'pending',
+        po: 'pending',
+        grn: 'pending',
+        inv: 'pending',
+        done: 'pending',
+      },
+    [flow?.phaseStatus]
+  )
+
   if (loading) {
     return (
       <div className="viewport">
@@ -112,6 +158,45 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
 
   const isEmpty = flow.vendors.length === 0 && flow.currentPhase === 'rfq'
   const showAction = flow.needsAction
+
+  const vendorCount = flow.vendors.length
+  const winner = selectedVendorName(flow)
+
+  const negPill: PhasePillSpec = (() => {
+    if (phaseStatus.neg === 'walked') {
+      return { kind: 'err', text: 'no vendor available' }
+    }
+    if (phaseStatus.neg === 'done') {
+      return { kind: 'ok', text: winner ? `awarded · ${winner}` : 'completed' }
+    }
+    if (vendorCount === 0) return { kind: 'idle', text: 'awaiting vendors' }
+    return { kind: 'go', text: `in progress · ${vendorCount} vendors` }
+  })()
+
+  const poPill = pillForStatus(phaseStatus.po, {
+    done: 'fulfilled',
+    inProgress: 'issued',
+    pending: 'pending',
+    walked: 'rejected',
+  })
+  const grnPill = pillForStatus(phaseStatus.grn, {
+    done: 'received',
+    inProgress: 'in transit',
+    pending: 'pending',
+  })
+  const invPill = pillForStatus(phaseStatus.inv, {
+    done: 'matched',
+    inProgress: 'verifying',
+    pending: 'pending',
+  })
+  const donePill = pillForStatus(phaseStatus.done, {
+    done: 'complete',
+    inProgress: 'finalizing',
+    pending: 'pending',
+  })
+
+  const grn = flow.grn as Record<string, unknown> | null | undefined
+  const invoice = flow.invoice as Record<string, unknown> | null | undefined
 
   return (
     <div className="viewport">
@@ -162,76 +247,189 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
       <Timeline
         phase={isEmpty ? 'rfq' : flow.currentPhase}
         durations={flow.phaseDurations}
+        phaseStatus={phaseStatus}
         empty={isEmpty}
       />
 
       <div className="flow-layout" style={{ marginTop: 20 }}>
-        <SidebarNav active={activeSec} onPick={setActiveSec} isEmpty={isEmpty} />
+        <SidebarNav
+          active={activeSec}
+          onPick={handlePickSection}
+          isEmpty={isEmpty}
+          flow={flow}
+        />
 
         <main>
           {isEmpty ? (
             <EmptyFlowBody />
           ) : (
             <>
-              <Section
-                title="Specification & approval"
-                num="1.0"
-                defaultOpen={false}
-                status={<StatusPill kind="ok">spec validated</StatusPill>}
-              >
-                <div className="kv">
-                  <div className="k">Target total</div>
-                  <div className="v tnum">{fmtMoney(flow.target)}</div>
-                  <div className="k">Specification</div>
-                  <div className="v">{flow.spec || '—'}</div>
-                  <div className="k">Status</div>
-                  <div className="v">{flow.prStatus ?? '—'}</div>
-                </div>
-              </Section>
+              <div id="sec-spec">
+                <Section
+                  title="Specification & approval"
+                  num="1.0"
+                  defaultOpen={false}
+                  status={
+                    flow.specDone !== false ? (
+                      <StatusPill kind="ok">spec validated</StatusPill>
+                    ) : (
+                      <StatusPill kind="go">validating</StatusPill>
+                    )
+                  }
+                >
+                  <div className="kv">
+                    <div className="k">Target total</div>
+                    <div className="v tnum">{fmtMoney(flow.target)}</div>
+                    <div className="k">Specification</div>
+                    <div className="v">{flow.spec || '—'}</div>
+                    <div className="k">Status</div>
+                    <div className="v">{flow.prStatus ?? '—'}</div>
+                  </div>
+                </Section>
+              </div>
 
-              <Section
-                title="Negotiation — parallel tracks"
-                num="3.0"
-                defaultOpen
-                status={
-                  <StatusPill kind="go">
-                    {flow.vendors.length > 0
-                      ? `in progress · ${flow.vendors.length} vendors`
-                      : 'awaiting vendors'}
-                  </StatusPill>
-                }
-                right={
-                  flow.target > 0 ? (
-                    <span className="t-xs muted">target {fmtMoney(flow.target)}</span>
-                  ) : undefined
-                }
-              >
-                {flow.vendors.length > 0 ? (
-                  <NegotiationBoard vendors={flow.vendors} />
-                ) : (
-                  <PendingPlaceholder label="Vendor search and negotiation in progress." />
-                )}
-              </Section>
-
-              <Section
-                title="Purchase order"
-                num="4.0"
-                pending={!flow.po}
-                defaultOpen={!!flow.po}
-                status={
-                  flow.po ? (
-                    <StatusPill kind="ok">issued</StatusPill>
+              <div id="sec-rfq">
+                <Section
+                  title="RFQ — request for quote"
+                  num="2.0"
+                  defaultOpen={false}
+                  pending={phaseStatus.rfq === 'pending'}
+                  status={(() => {
+                    const p = pillForStatus(phaseStatus.rfq, {
+                      done: vendorCount > 0 ? `${vendorCount} responded` : 'completed',
+                      inProgress: vendorCount > 0
+                        ? `collecting · ${vendorCount} responded`
+                        : 'collecting quotes',
+                      pending: 'pending',
+                      walked: 'no vendors found',
+                    })
+                    return <StatusPill kind={p.kind}>{p.text}</StatusPill>
+                  })()}
+                >
+                  {vendorCount > 0 ? (
+                    <div className="kv">
+                      <div className="k">Vendors invited</div>
+                      <div className="v">{vendorCount}</div>
+                      <div className="k">Responded</div>
+                      <div className="v">{vendorCount}</div>
+                    </div>
                   ) : (
-                    <StatusPill kind="idle">pending</StatusPill>
-                  )
-                }
-              >
-                {flow.po ? (
-                  <pre className="t-xs">{JSON.stringify(flow.po, null, 2)}</pre>
-                ) : (
-                  <PendingPlaceholder label="PO will be issued after approval." />
-                )}
-              </Section>
+                    <PendingPlaceholder label="Awaiting vendor responses." />
+                  )}
+                </Section>
+              </div>
+
+              <div id="sec-neg">
+                <Section
+                  title="Negotiation — parallel tracks"
+                  num="3.0"
+                  defaultOpen
+                  status={<StatusPill kind={negPill.kind}>{negPill.text}</StatusPill>}
+                  right={
+                    flow.target > 0 ? (
+                      <span className="t-xs muted">target {fmtMoney(flow.target)}</span>
+                    ) : undefined
+                  }
+                >
+                  {flow.vendors.length > 0 ? (
+                    <NegotiationBoard vendors={flow.vendors} />
+                  ) : (
+                    <PendingPlaceholder label="Vendor search and negotiation in progress." />
+                  )}
+                </Section>
+              </div>
+
+              <div id="sec-award">
+                <SelectedVendorSection
+                  flow={flow}
+                  negPhase={phaseStatus.neg}
+                />
+              </div>
+
+              <div id="sec-po">
+                <Section
+                  title="Purchase order"
+                  num="4.0"
+                  pending={!flow.po}
+                  defaultOpen={!!flow.po && phaseStatus.po === 'in_progress'}
+                  status={<StatusPill kind={poPill.kind}>{poPill.text}</StatusPill>}
+                >
+                  {flow.po ? (
+                    <pre className="t-xs">{JSON.stringify(flow.po, null, 2)}</pre>
+                  ) : (
+                    <PendingPlaceholder label="PO will be issued after approval." />
+                  )}
+                </Section>
+              </div>
+
+              <div id="sec-grn">
+                <Section
+                  title="Goods receipt"
+                  num="5.0"
+                  pending={!grn}
+                  defaultOpen={!!grn && phaseStatus.grn === 'in_progress'}
+                  status={<StatusPill kind={grnPill.kind}>{grnPill.text}</StatusPill>}
+                >
+                  {grn ? (
+                    <pre className="t-xs">{JSON.stringify(grn, null, 2)}</pre>
+                  ) : (
+                    <PendingPlaceholder label="Awaiting goods receipt from vendor." />
+                  )}
+                </Section>
+              </div>
+
+              <div id="sec-inv">
+                <Section
+                  title="Invoice match"
+                  num="6.0"
+                  pending={!invoice}
+                  defaultOpen={!!invoice && phaseStatus.inv === 'in_progress'}
+                  status={<StatusPill kind={invPill.kind}>{invPill.text}</StatusPill>}
+                >
+                  {invoice ? (
+                    <pre className="t-xs">{JSON.stringify(invoice, null, 2)}</pre>
+                  ) : (
+                    <PendingPlaceholder label="Awaiting vendor invoice." />
+                  )}
+                </Section>
+              </div>
+
+              <div id="sec-done">
+                <Section
+                  title="Completion"
+                  num="7.0"
+                  pending={phaseStatus.done !== 'done'}
+                  defaultOpen={phaseStatus.done === 'done'}
+                  status={<StatusPill kind={donePill.kind}>{donePill.text}</StatusPill>}
+                >
+                  {phaseStatus.done === 'done' ? (
+                    <div className="kv">
+                      <div className="k">PO</div>
+                      <div className="v tnum">
+                        {(flow.po as { po_number?: string } | null)?.po_number ?? '—'}
+                      </div>
+                      <div className="k">GRN</div>
+                      <div className="v tnum">
+                        {(grn as { grn_number?: string } | null)?.grn_number ?? '—'}
+                      </div>
+                      <div className="k">Invoice</div>
+                      <div className="v tnum">
+                        {(invoice as { invoice_number?: string } | null)?.invoice_number ?? '—'}
+                      </div>
+                      <div className="k">Final price</div>
+                      <div className="v tnum">
+                        {fmtMoney(
+                          ((flow.po as { agreed_price?: number } | null)?.agreed_price ??
+                            (flow.selectedVendor as { final_price?: number } | null)?.final_price ??
+                            0) as number
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <PendingPlaceholder label="Workflow will close after payment is authorized." />
+                  )}
+                </Section>
+              </div>
             </>
           )}
         </main>
@@ -246,6 +444,100 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
 
       <div style={{ height: 80 }} />
     </div>
+  )
+}
+
+interface SelectedVendorSectionProps {
+  flow: ActiveFlow
+  negPhase: PhaseStatus | undefined
+}
+
+function SelectedVendorSection({ flow, negPhase }: SelectedVendorSectionProps) {
+  const winner = flow.vendors.find((v) => v.status === 'WON')
+  const sv = (flow.selectedVendor ?? {}) as Record<string, unknown>
+  const finalPrice =
+    (typeof sv.final_price === 'number' ? sv.final_price : undefined) ??
+    (typeof (flow.po as { agreed_price?: number } | null)?.agreed_price === 'number'
+      ? (flow.po as { agreed_price?: number }).agreed_price
+      : undefined) ??
+    winner?.latest ??
+    null
+  const savings =
+    finalPrice != null && flow.target > 0 ? flow.target - finalPrice : null
+  const savingsPct =
+    savings != null && flow.target > 0 ? (savings / flow.target) * 100 : null
+
+  const pill = (() => {
+    if (winner) return { kind: 'ok' as const, text: 'awarded' }
+    if (negPhase === 'walked')
+      return { kind: 'err' as const, text: 'no vendor available' }
+    return { kind: 'idle' as const, text: 'pending' }
+  })()
+
+  return (
+    <Section
+      title="Selected vendor"
+      num="3.5"
+      pending={!winner}
+      defaultOpen={!!winner}
+      status={<StatusPill kind={pill.kind}>{pill.text}</StatusPill>}
+    >
+      {winner ? (
+        <div className="award-card">
+          <div className="award-head">
+            <div>
+              <div className="award-name">{winner.name}</div>
+              <div className="award-meta">
+                {winner.id} · {winner.country} · {winner.round}
+              </div>
+            </div>
+            <span className="t-xs muted" style={{ letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+              [ ✓ awarded ]
+            </span>
+          </div>
+          <div className="award-grid">
+            <div className="k">Final price</div>
+            <div className="v tnum">{finalPrice != null ? fmtMoney(finalPrice) : '—'}</div>
+            <div className="k">vs target</div>
+            <div
+              className={`v ${
+                savings != null && savings > 0
+                  ? 'delta-down'
+                  : savings != null && savings < 0
+                  ? 'delta-up'
+                  : ''
+              }`}
+            >
+              {savings == null
+                ? '—'
+                : savings >= 0
+                ? `−${fmtMoney(savings)}`
+                : `+${fmtMoney(-savings)}`}
+              {savingsPct != null && (
+                <span className="muted" style={{ marginLeft: 6 }}>
+                  ({savingsPct >= 0 ? '−' : '+'}
+                  {Math.abs(savingsPct).toFixed(1)}%)
+                </span>
+              )}
+            </div>
+            <div className="k">Lead time</div>
+            <div className="v">{winner.lead}</div>
+            <div className="k">MOQ</div>
+            <div className="v">{winner.moq}</div>
+            <div className="k">Rounds</div>
+            <div className="v">{winner.round}</div>
+            <div className="k">Outcome</div>
+            <div className="v">
+              {typeof sv.outcome === 'string' ? String(sv.outcome) : 'ACCEPTED'}
+            </div>
+          </div>
+        </div>
+      ) : negPhase === 'walked' ? (
+        <PendingPlaceholder label="No vendor could meet the requirements." />
+      ) : (
+        <PendingPlaceholder label="Awaiting negotiation outcome." />
+      )}
+    </Section>
   )
 }
 

@@ -21,8 +21,8 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" className={jetbrainsMono.variable}>
-      <body>
+    <html lang="en" className={jetbrainsMono.variable} suppressHydrationWarning>
+      <body suppressHydrationWarning>
         <ClientShell>{children}</ClientShell>
       </body>
     </html>

@@ -24,9 +24,11 @@ from api.services.status_mapping import (
     is_walked_away,
     needs_action,
     parse_pr_status,
+    phase_status_map,
     pr_status_human_label,
     pr_status_to_phase_id,
     pr_status_to_phase_label,
+    spec_done,
 )
 from db.collections.vendor import Vendor
 from db.collections.workflow_event import WorkflowEventDoc
@@ -305,6 +307,8 @@ def workflow_detail_from_state(
             "inv": None,
             "done": None,
         },
+        phaseStatus=phase_status_map(pr_status),
+        specDone=spec_done(pr_status),
         currentPhase=pr_status_to_phase_id(pr_status),
         needsAction=needs_action(pr_status),
         actionLabel=action_label(pr_status),

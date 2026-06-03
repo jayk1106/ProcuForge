@@ -50,6 +50,8 @@ export interface ActivityItem {
   det: string
 }
 
+export type PhaseStatus = 'pending' | 'in_progress' | 'done' | 'walked'
+
 export interface ActiveFlow {
   id: string
   requestId?: string
@@ -62,6 +64,8 @@ export interface ActiveFlow {
   spec: string
   prStatus?: string
   phaseDurations: Record<string, string | null>
+  phaseStatus?: Record<string, PhaseStatus>
+  specDone?: boolean
   currentPhase: PhaseId
   needsAction?: boolean
   actionLabel?: string | null

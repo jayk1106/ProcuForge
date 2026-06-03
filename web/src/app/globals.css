@@ -472,6 +472,55 @@ a { color: inherit; text-decoration: none; }
 .timeline .step.active .marker { background: var(--accent); border-color: var(--accent); }
 .timeline .step.fail .marker { background: var(--err); border-color: var(--err); }
 
+/* completion state — minimal: thin ok-colored border + ok-tinted "done" labels */
+.timeline { position: relative; }
+.timeline.complete { border-color: var(--ok); }
+.timeline.complete .step { border-right-color: var(--ok); }
+.timeline.complete .step:last-child { border-right: 0; }
+.timeline.complete .step .dur { color: var(--ok); }
+.timeline .complete-stamp {
+  font-size: var(--t-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ok);
+}
+
+/* selected vendor / award card — bordered, mono, kv-style */
+.award-card {
+  border: 1px solid var(--ok);
+  padding: 14px 16px;
+  background: var(--bg);
+}
+.award-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  padding-bottom: 10px;
+  margin-bottom: 12px;
+  border-bottom: 1px dashed var(--rule);
+}
+.award-name { font-size: var(--t-sm); font-weight: 600; color: var(--ink); }
+.award-meta { font-size: var(--t-xs); color: var(--faint); margin-top: 2px; }
+.award-grid {
+  display: grid;
+  grid-template-columns: 140px 1fr 140px 1fr;
+  gap: 6px 16px;
+  font-size: var(--t-sm);
+}
+.award-grid .k {
+  color: var(--muted);
+  font-size: var(--t-xs);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.award-grid .v { color: var(--ink); font-variant-numeric: tabular-nums; }
+.award-grid .v.delta-down { color: var(--ok); }
+.award-grid .v.delta-up { color: var(--err); }
+@media (max-width: 900px) {
+  .award-grid { grid-template-columns: 140px 1fr; }
+}
+
 /* sidebar nav (flow detail) */
 .flow-layout {
   display: grid;
