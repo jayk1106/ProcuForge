@@ -2,8 +2,16 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from procu_forge_buyer.pr_status import PrStatus
 from procu_forge_buyer.pr_status_transitions import HUMAN_GATED_PR_STATUSES
+from procu_forge_buyer.state_keys import (
+    INVOICE_VENDOR_ACK_KEY,
+    PO_VENDOR_ACK_KEY,
+    PR_STATUS_KEY,
+    PROCESS_COMPLETE_VENDOR_ACK_KEY,
+)
 
 PhaseLabel = str  # RFQ | NEG | PO | GRN | INV | DONE
 PhaseId = str  # rfq | neg | po | grn | inv | done | walked
@@ -16,6 +24,20 @@ def parse_pr_status(raw: str | None) -> PrStatus:
         return PrStatus(raw)
     except ValueError:
         return PrStatus.INITIATED
+
+
+def effective_pr_status(state: dict[str, Any]) -> PrStatus:
+    """Return UI-facing status, inferring from vendor ack keys when ``pr_status`` lags."""
+    stored = parse_pr_status(state.get(PR_STATUS_KEY))
+    if stored in {PrStatus.COMPLETED, PrStatus.CANCELLED, PrStatus.ESCALATED}:
+        return stored
+    if state.get(PROCESS_COMPLETE_VENDOR_ACK_KEY):
+        return PrStatus.COMPLETED
+    if state.get(INVOICE_VENDOR_ACK_KEY):
+        return PrStatus.INVOICE_UNDER_VERIFICATION
+    if state.get(PO_VENDOR_ACK_KEY):
+        return PrStatus.PO_ACKNOWLEDGED
+    return stored
 
 
 def pr_status_to_phase_label(status: PrStatus) -> PhaseLabel:

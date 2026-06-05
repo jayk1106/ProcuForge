@@ -9,6 +9,7 @@ from .callbacks import (
     manage_log_before_orchestrator,
     manage_log_after_pr_router,
     manage_log_before_pr_router,
+    repair_purchase_status_callback,
     stop_loop_if_terminal,
 )
 from .subagents.vendor_search import vendor_search_agent
@@ -94,6 +95,7 @@ pr_router = Agent(
     ],
     after_agent_callback=[
         manage_log_after_pr_router,
+        repair_purchase_status_callback,
         stop_loop_if_terminal,
     ],
 )

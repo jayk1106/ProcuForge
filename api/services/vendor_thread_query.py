@@ -12,6 +12,7 @@ from api.schemas.vendor_thread_status import VendorThreadStatus
 from api.services.session_reader import BuyerSessionReader, VendorSessionReader
 from api.services.ui_mappers import vendor_convo_from_state, vendor_thread_rows_from_state
 from api.ws import publish
+from db.firestore.repositories.products import ProductRepository
 from db.firestore.repositories.rfq_index import RfqIndexRepository
 from db.firestore.repositories.vendors import VendorRepository
 from db.firestore.repositories.workflow_events import WorkflowEventsRepository
@@ -32,12 +33,14 @@ class VendorThreadQueryService:
         vendor_repo: VendorRepository,
         rfq_index_repo: RfqIndexRepository,
         events_repo: WorkflowEventsRepository,
+        product_repo: ProductRepository | None = None,
     ) -> None:
         self._settings = settings
         self._index_repo = index_repo
         self._vendor_repo = vendor_repo
         self._rfq_index_repo = rfq_index_repo
         self._events_repo = events_repo
+        self._product_repo = product_repo
         self._buyer_reader = BuyerSessionReader(settings)
         self._vendor_reader = VendorSessionReader(settings)
 
@@ -109,12 +112,21 @@ class VendorThreadQueryService:
 
         state = session.state if isinstance(session.state, dict) else {}
         vendor_doc = await self._vendor_repo.get(vendor_id)
+        product_doc = None
+        product = state.get("product") if isinstance(state.get("product"), dict) else {}
+        product_id = str(product.get("id") or "") if isinstance(product, dict) else ""
+        if product_id and self._product_repo is not None:
+            try:
+                product_doc = await self._product_repo.get(product_id)
+            except Exception:  # noqa: BLE001 — soft-fail; UI falls back to SKU/id from state
+                product_doc = None
         events = await self._events_repo.list_for_vendor_thread(workflow_id, rfq_id)
         return vendor_convo_from_state(
             rfq_id,
             state,
             workflow_id=workflow_id,
             vendor_doc=vendor_doc,
+            product_doc=product_doc,
             events=events,
         )
 

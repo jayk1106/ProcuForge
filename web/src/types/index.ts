@@ -85,7 +85,23 @@ export interface VendorConvoMessage {
   phase: string
   locked?: boolean
   error?: boolean
-  payload: Record<string, string | number>
+  payload: Record<string, unknown>
+  highlight?: string
+  round?: number | null
+}
+
+export interface VendorThreadSummary {
+  status: string
+  quotedPrice?: number | null
+  acceptedPrice?: number | null
+  latestOfferPrice?: number | null
+  lastSellingPrice?: number | null
+  currency: string
+  poNumber?: string | null
+  grnNumber?: string | null
+  invoiceNumber?: string | null
+  expectedDelivery?: string | null
+  deliveredOn?: string | null
 }
 
 export interface VendorConvo {
@@ -96,10 +112,18 @@ export interface VendorConvo {
     tier: string
     mssa: string
   }
+  product?: {
+    id?: string
+    name?: string
+    sku?: string
+    brand?: string
+    type?: string
+  }
   pr: string
   workflowId?: string
   rfqId?: string
   outcome: string
+  summary?: VendorThreadSummary
   messages: VendorConvoMessage[]
 }
 

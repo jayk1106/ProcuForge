@@ -214,16 +214,13 @@ INITIATED
   │               └──→ NEGOTIATION_COMPLETED
   │                         │ [auto] ≥1 vendor ACCEPTED → decision selects winner
   │                         ├──→ VENDOR_SELECTED
-  │                         │         │ [auto] RFQ_CLOSED sent to losing vendors
-  │                         │         └──→ AWAITING_USER_APPROVAL  ← HUMAN GATE
-  │                         │                   │ [human] user sends approval message
-  │                         │                   └──→ PO_ISSUED
-  │                         │                             │ [auto] vendor sends PO_ACKNOWLEDGED
-  │                         │                             └──→ PO_ACKNOWLEDGED
-  │                         │                                       │ [auto] GRN sent + invoice received
-  │                         │                                       └──→ INVOICE_UNDER_VERIFICATION
-  │                         │                                                 │ [auto] PROCESS_COMPLETE sent
-  │                         │                                                 └──→ COMPLETED ✓
+  │                         │         │ [auto] send_po: RFQ_CLOSED to losers (best-effort) + PO to winner
+  │                         │         │          losers notified OR po_vendor_ack → PO_ISSUED
+  │                         │         │ [auto] po_vendor_ack → PO_ACKNOWLEDGED
+  │                         │         │ [auto] invoice_vendor_ack → INVOICE_UNDER_VERIFICATION
+  │                         │         │ [auto] process_complete_vendor_ack → COMPLETED ✓
+  │                         │         │
+  │                         │         └── (sync_purchase_pr_status_from_acks chains the above)
   │                         │
   │                         └─ [auto] all vendors walked away
   │                               └──→ NO_VENDOR_AVAILABLE ✗
@@ -251,11 +248,17 @@ CANCELLED            — PR cancelled
 | Negotiation starts | `transition_to_negotiation_in_progress(state)` | VENDORS_DISCOVERED → NEGOTIATION_IN_PROGRESS |
 | All vendors done | `transition_after_negotiation(state)` | NEGOTIATION_IN_PROGRESS → NEGOTIATION_COMPLETED |
 | Vendor selected | `transition_after_decision(state)` | NEGOTIATION_COMPLETED → VENDOR_SELECTED |
-| Human review | `transition_to_awaiting_user_approval(state)` | VENDOR_SELECTED → AWAITING_USER_APPROVAL |
-| Human approved | `transition_to_po_issued(state)` | AWAITING_USER_APPROVAL → PO_ISSUED |
-| PO acknowledged | `transition_to_po_acknowledged(state)` | PO_ISSUED → PO_ACKNOWLEDGED |
-| Invoice received | `transition_to_invoice_under_verification(state)` | PO_ACKNOWLEDGED → INVOICE_UNDER_VERIFICATION |
-| Cycle complete | `transition_to_completed(state)` | INVOICE_UNDER_VERIFICATION → COMPLETED |
+| PO issued | `transition_to_po_issued(state)` | VENDOR_SELECTED → PO_ISSUED (losers notified **or** `po_vendor_ack` present) |
+| PO acknowledged | `transition_to_po_acknowledged(state)` | PO_ISSUED → PO_ACKNOWLEDGED (`po_vendor_ack` required) |
+| Invoice received | `transition_to_invoice_under_verification(state)` | PO_ACKNOWLEDGED → INVOICE_UNDER_VERIFICATION (`invoice_vendor_ack` required) |
+| Cycle complete | `transition_to_completed(state)` | INVOICE_UNDER_VERIFICATION → COMPLETED (`process_complete_vendor_ack` required) |
+| Purchase sync (chained) | `sync_purchase_pr_status_from_acks(state)` | Idempotent chain from `VENDOR_SELECTED` through `COMPLETED` based on ack keys |
+
+**RFQ_CLOSED to losing vendors** is **best-effort**: `send_po` attempts it before the winner PO, logs `rfq_closed_incomplete` if losers remain open when `po_vendor_ack` unblocks status, and never blocks `COMPLETED`. Partial failure is surfaced in `send_po` result as `rfq_closed: { ok, all_notified, closed }`.
+
+**Stuck-session repair:** `repair_purchase_status_callback` on `pr_router` calls `sync_purchase_pr_status_from_acks` when stored `pr_status` lags behind ack keys (no purchase tools re-run).
+
+**UI fallback:** `api.services.status_mapping.effective_pr_status(state)` infers display status from ack keys when `pr_status` was saved before a sync fix.
 
 ### 3.3 Stop Categories
 
@@ -273,10 +276,10 @@ HUMAN_GATED_PR_STATUSES = {
 STOP_PR_STATUSES = TERMINAL_PR_STATUSES | HUMAN_GATED_PR_STATUSES
 ```
 
-> **Note on AWAITING_USER_APPROVAL:** The agent loop stops on the **first** encounter
-> (to display the selection summary). When the user sends the next message, the loop
-> restarts and `po_approval_shown=True` prevents a second stop — the loop proceeds
-> to call `approve_po` and advance to `PO_ISSUED`.
+> **Note on AWAITING_USER_APPROVAL:** Legacy human-gate status; the automated purchase
+> flow no longer transitions through it. `purchase_manager` chains `send_po` →
+> `send_grn_created` → `send_process_complete` in one turn and advances `pr_status`
+> via `sync_purchase_pr_status_from_acks`.
 
 ---
 
@@ -305,23 +308,22 @@ Use this to know which UI sections to render.
 
 ---
 
-## 5. Human Gate — AWAITING_USER_APPROVAL
+## 5. Purchase Phase — Automated Flow
 
-This is the only status requiring explicit human input before the workflow continues.
+After `VENDOR_SELECTED`, `purchase_manager` runs without human approval:
 
-| Field | Value |
-|-------|-------|
-| **Status** | `AWAITING_USER_APPROVAL` |
-| **What to show** | Selected vendor card: `selected_vendor.vendor`, `selected_vendor.final_price`, `selected_vendor.outcome`; comparison against `vendor_offers` |
-| **Required action** | User sends any follow-up message (treated as approval) |
-| **What happens next** | `approve_po` tool is called → `pr_status = PO_ISSUED` → `send_po` runs on next turn |
-| **Cancel path** | Not yet automated — set `pr_status = CANCELLED` externally via API |
-| **Gate flag** | `po_approval_shown` — `True` means the summary was already displayed once |
+| Step | Tool | State keys set | pr_status advance (via sync) |
+|------|------|----------------|------------------------------|
+| 1 | `send_po` | `po`, `po_vendor_ack`, `rfq_closed_losers` (per loser) | → `PO_ISSUED` → `PO_ACKNOWLEDGED` |
+| 2 | `send_grn_created` | `grn`, `invoice`, `invoice_vendor_ack` | → `INVOICE_UNDER_VERIFICATION` |
+| 3 | `send_process_complete` | `process_complete`, `process_complete_vendor_ack` | → `COMPLETED` |
 
-**Recommended UI:**
-- Show a prominent "Approve PO" button that sends a message to the agent (e.g., "Approved — proceed with PO issuance").
-- Show vendor summary: vendor name, agreed price, original catalog price, discount achieved.
-- Show "Cancel" button that calls an external API to set `pr_status = CANCELLED`.
+`purchase_manager_after_agent` and `repair_purchase_status_callback` call
+`sync_purchase_pr_status_from_acks` to apply the chain idempotently.
+
+**RFQ_CLOSED:** Best-effort inside `send_po`. One retry on empty loser reply.
+Failure leaves the loser unmarked in `rfq_closed_losers` but does not block the
+winner PO or final `COMPLETED` status.
 
 ---
 
@@ -332,7 +334,6 @@ Use these categories to determine which UI component to render for a given `pr_s
 | Category | Statuses | Suggested Treatment |
 |----------|----------|-------------------|
 | **Processing (auto)** | `INITIATED`, `VENDORS_DISCOVERED`, `NEGOTIATION_IN_PROGRESS`, `NEGOTIATION_COMPLETED`, `VENDOR_SELECTED` | Spinner / progress stepper — no action needed |
-| **Human gate** | `AWAITING_USER_APPROVAL` | Action card with Approve / Cancel buttons |
 | **Document flow (auto)** | `PO_ISSUED`, `PO_ACKNOWLEDGED`, `INVOICE_UNDER_VERIFICATION` | Document timeline — PO → GRN → Invoice |
 | **Success** | `COMPLETED` | Green success banner with summary |
 | **No vendor** | `NO_VENDORS_DISCOVERED`, `NO_VENDOR_AVAILABLE` | Red error state with retry option |

@@ -11,6 +11,7 @@ from api.schemas.ui_dto import (
     VendorConvoDTO,
     VendorThreadMessageDTO,
     VendorThreadRowDTO,
+    VendorThreadSummaryDTO,
     WorkflowDetailDTO,
     WorkflowRowDTO,
 )
@@ -21,6 +22,7 @@ from api.schemas.vendor_thread_status import (
 )
 from api.services.status_mapping import (
     action_label,
+    effective_pr_status,
     is_walked_away,
     needs_action,
     parse_pr_status,
@@ -30,6 +32,7 @@ from api.services.status_mapping import (
     pr_status_to_phase_label,
     spec_done,
 )
+from db.collections.product import Product
 from db.collections.vendor import Vendor
 from db.collections.workflow_event import WorkflowEventDoc
 from procu_forge_buyer.state_keys import (
@@ -170,7 +173,7 @@ def workflow_row_from_state(
 ) -> WorkflowRowDTO:
     request = state.get(REQUEST_KEY) if isinstance(state.get(REQUEST_KEY), dict) else {}
     product = state.get("product") if isinstance(state.get("product"), dict) else {}
-    pr_status = parse_pr_status(state.get(PR_STATUS_KEY))
+    pr_status = effective_pr_status(state)
 
     qty = _get(request, "quantity", default="")
     pid = _get(request, "product_id", "productId", default="")
@@ -205,7 +208,7 @@ def workflow_detail_from_state(
 ) -> WorkflowDetailDTO:
     request = state.get(REQUEST_KEY) if isinstance(state.get(REQUEST_KEY), dict) else {}
     product = state.get("product") if isinstance(state.get("product"), dict) else {}
-    pr_status = parse_pr_status(state.get(PR_STATUS_KEY))
+    pr_status = effective_pr_status(state)
     vendor_names = vendor_names or {}
 
     budget = _get(request, "budget_ceiling", "budgetCeiling", default=0)
@@ -388,71 +391,239 @@ def vendor_thread_rows_from_state(
     return rows
 
 
+_NEGOTIATION_MSG_TYPES = frozenset({"RFQ", "QUOTE", "COUNTER_OFFER", "ACCEPT", "WALKAWAY"})
+_FULFILLMENT_MSG_TYPES = frozenset(
+    {"PO", "PO_ACKNOWLEDGED", "GRN_CREATED", "INVOICE_SUBMITTED", "PROCESS_COMPLETE", "RFQ_CLOSED"}
+)
+
+
+def _coerce_float(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _fmt_money(value: Any, currency: str = "USD") -> str:
+    num = _coerce_float(value)
+    if num is None:
+        return ""
+    symbol = "$" if currency.upper() == "USD" else f"{currency} "
+    return f"{symbol}{num:,.2f}"
+
+
+def _phase_for(msg_type: str) -> str:
+    if msg_type in _NEGOTIATION_MSG_TYPES:
+        return "negotiation"
+    if msg_type in _FULFILLMENT_MSG_TYPES:
+        return "fulfillment"
+    return ""
+
+
+def _message_highlight(msg_type: str, payload: dict[str, Any], currency: str) -> str:
+    """One-line summary shown next to each timeline event."""
+    p = payload if isinstance(payload, dict) else {}
+    item = p.get("item") if isinstance(p.get("item"), dict) else {}
+
+    if msg_type == "RFQ":
+        qty = item.get("quantity")
+        required_by = p.get("required_by") or p.get("requiredBy")
+        bits = []
+        if qty is not None:
+            bits.append(f"qty {qty}")
+        if required_by:
+            bits.append(f"need by {required_by}")
+        return " · ".join(bits)
+
+    if msg_type in {"QUOTE", "COUNTER_OFFER", "ACCEPT"}:
+        unit = _fmt_money(p.get("unit_price") or p.get("unitPrice"), currency)
+        total = _fmt_money(p.get("total_price") or p.get("totalPrice"), currency)
+        bits = []
+        if unit:
+            bits.append(f"{unit} / unit")
+        if total and total != unit:
+            bits.append(f"total {total}")
+        if msg_type == "COUNTER_OFFER" and p.get("is_final"):
+            bits.append("final")
+        return " · ".join(bits)
+
+    if msg_type == "WALKAWAY":
+        reason = p.get("reason") or p.get("walkaway_reason")
+        return f"reason {reason}" if reason else "walkaway"
+
+    if msg_type == "RFQ_CLOSED":
+        outcome = p.get("outcome")
+        return str(outcome) if outcome else "rfq closed"
+
+    if msg_type == "PO":
+        po = p.get("po_number") or p.get("poNumber")
+        total = _fmt_money(p.get("total_amount") or p.get("totalAmount"), currency)
+        delivery = p.get("delivery_date") or p.get("deliveryDate")
+        bits = []
+        if po:
+            bits.append(str(po))
+        if total:
+            bits.append(f"total {total}")
+        if delivery:
+            bits.append(f"deliver {delivery}")
+        return " · ".join(bits)
+
+    if msg_type == "PO_ACKNOWLEDGED":
+        po = p.get("po_number") or p.get("poNumber")
+        return f"ack {po}" if po else "acknowledged"
+
+    if msg_type == "GRN_CREATED":
+        grn = p.get("grn_number") or p.get("grnNumber")
+        received = p.get("received_at") or p.get("receivedAt")
+        bits = []
+        if grn:
+            bits.append(str(grn))
+        if received:
+            bits.append(f"received {str(received)[:10]}")
+        return " · ".join(bits)
+
+    if msg_type == "INVOICE_SUBMITTED":
+        inv = p.get("invoice_number") or p.get("invoiceNumber")
+        total = _fmt_money(p.get("total_amount") or p.get("totalAmount"), currency)
+        due = p.get("due_date") or p.get("dueDate")
+        bits = []
+        if inv:
+            bits.append(str(inv))
+        if total:
+            bits.append(f"total {total}")
+        if due:
+            bits.append(f"due {due}")
+        return " · ".join(bits)
+
+    if msg_type == "PROCESS_COMPLETE":
+        bits = [str(p.get(k)) for k in ("po_number", "grn_number", "invoice_number") if p.get(k)]
+        return " · ".join(bits)
+
+    return ""
+
+
+def _build_vendor_summary(
+    state: dict[str, Any],
+    messages: list[VendorThreadMessageDTO],
+) -> VendorThreadSummaryDTO:
+    product = state.get("product") if isinstance(state.get("product"), dict) else {}
+    currency = str(product.get("currency") or "USD") if isinstance(product, dict) else "USD"
+
+    quoted: float | None = None
+    for msg in messages:
+        if msg.type == "QUOTE" and quoted is None:
+            quoted = _coerce_float(msg.payload.get("unit_price") or msg.payload.get("unitPrice"))
+            break
+
+    accepted = _coerce_float(state.get("accepted_price"))
+    latest_offer = _coerce_float(state.get("latest_offer_price"))
+    last_selling = _coerce_float(state.get("last_selling_price"))
+
+    po = state.get("po") if isinstance(state.get("po"), dict) else {}
+    grn = state.get("grn") if isinstance(state.get("grn"), dict) else {}
+
+    invoice_number: str | None = None
+    for msg in reversed(messages):
+        if msg.type == "INVOICE_SUBMITTED":
+            invoice_number = str(msg.payload.get("invoice_number") or "") or None
+            break
+
+    # Delivered date = GRN ``received_at`` (actual receipt). Stripped to YYYY-MM-DD.
+    delivered_on: str | None = None
+    received_at = grn.get("received_at") if grn else None
+    if received_at:
+        delivered_on = str(received_at)[:10]
+
+    expected_delivery = (
+        str(po.get("delivery_date")) if po and po.get("delivery_date") else None
+    )
+
+    return VendorThreadSummaryDTO(
+        status=str(state.get("status") or ""),
+        quotedPrice=quoted,
+        acceptedPrice=accepted,
+        latestOfferPrice=latest_offer,
+        lastSellingPrice=last_selling,
+        currency=currency,
+        poNumber=(str(po.get("po_number")) if po.get("po_number") else None) if po else None,
+        grnNumber=(str(grn.get("grn_number")) if grn.get("grn_number") else None) if grn else None,
+        invoiceNumber=invoice_number,
+        expectedDelivery=expected_delivery,
+        deliveredOn=delivered_on,
+    )
+
+
 def vendor_convo_from_state(
     rfq_id: str,
     state: dict[str, Any],
     *,
     workflow_id: str = "",
     vendor_doc: Vendor | None = None,
-    events: list[WorkflowEventDoc] | None = None,
+    product_doc: Product | None = None,
+    events: list[WorkflowEventDoc] | None = None,  # noqa: ARG001 — kept for ABI
 ) -> VendorConvoDTO:
+    """Build the conversation DTO from the vendor session state.
+
+    ``state.communication`` is the source of truth — it carries every envelope
+    (negotiation + fulfillment) the vendor processed for this rfq. Workflow
+    events are intentionally not used here because they only cover negotiation
+    traffic emitted by the buyer's negotiator subagent.
+    """
     vendor_id = str(state.get("vendor_id") or "")
     status = str(state.get("status") or "UNKNOWN")
+    product = state.get("product") if isinstance(state.get("product"), dict) else {}
+    currency = (
+        str(product.get("currency") or "USD") if isinstance(product, dict) else "USD"
+    )
 
     messages: list[VendorThreadMessageDTO] = []
-    if events:
-        for event in events:
-            if event.event_type not in {
-                "vendor_message_outbound",
-                "vendor_message_inbound",
-            }:
-                continue
-            payload = event.payload if isinstance(event.payload, dict) else {}
-            inner = payload.get("payload") if isinstance(payload.get("payload"), dict) else {}
-            from_agent = (
-                "buyer_agent"
-                if event.event_type == "vendor_message_outbound"
-                else "vendor_agent"
+    comms = state.get("communication")
+    comms_list = comms if isinstance(comms, list) else []
+    for entry in comms_list:
+        if not isinstance(entry, dict):
+            continue
+        ts = str(entry.get("timestamp") or "")
+        msg_type = str(entry.get("message_type") or entry.get("messageType") or "MSG")
+        from_agent = str(entry.get("from_agent") or entry.get("fromAgent") or "")
+        to_agent = str(entry.get("to_agent") or entry.get("toAgent") or "")
+        payload = entry.get("payload") if isinstance(entry.get("payload"), dict) else {}
+        round_raw = entry.get("round")
+        try:
+            round_value = int(round_raw) if round_raw is not None else None
+        except (TypeError, ValueError):
+            round_value = None
+        messages.append(
+            VendorThreadMessageDTO(
+                ts=ts[:19].replace("T", " ") if ts else "",
+                **{"from": from_agent, "to": to_agent},
+                type=msg_type,
+                phase=_phase_for(msg_type),
+                payload=payload,
+                highlight=_message_highlight(msg_type, payload, currency),
+                round=round_value,
             )
-            to_agent = (
-                "vendor_agent"
-                if event.event_type == "vendor_message_outbound"
-                else "buyer_agent"
-            )
-            ts = event.ts.strftime("%Y-%m-%d %H:%M:%S") if event.ts else ""
-            messages.append(
-                VendorThreadMessageDTO(
-                    ts=ts,
-                    **{"from": from_agent, "to": to_agent},
-                    type=str(payload.get("message_type") or inner.get("message_type") or "MSG"),
-                    phase=status,
-                    payload=inner if inner else payload,
-                )
-            )
-    else:
-        comms = state.get("communication")
-        comms_list = comms if isinstance(comms, list) else []
-        for entry in comms_list:
-            if not isinstance(entry, dict):
-                continue
-            ts = str(entry.get("timestamp") or "")
-            msg_type = str(entry.get("message_type") or entry.get("messageType") or "MSG")
-            from_agent = str(entry.get("from_agent") or entry.get("fromAgent") or "")
-            to_agent = str(entry.get("to_agent") or entry.get("toAgent") or "")
-            payload = entry.get("payload")
-            messages.append(
-                VendorThreadMessageDTO(
-                    ts=ts[:19].replace("T", " ") if ts else "",
-                    **{"from": from_agent, "to": to_agent},
-                    type=msg_type,
-                    phase=status,
-                    payload=payload if isinstance(payload, dict) else {},
-                )
-            )
+        )
+
+    summary = _build_vendor_summary(state, messages)
 
     outcome = status
     if state.get("accepted_price"):
         outcome = f"ACCEPTED @ {state['accepted_price']}"
+
+    product_state = product if isinstance(product, dict) else {}
+    product_id = str(product_state.get("id") or "") if product_state else ""
+    product_sku = str(product_state.get("sku") or "") if product_state else ""
+    if product_doc is not None:
+        product_label = product_doc.name or product_sku or product_id
+        product_brand = product_doc.brand or ""
+        product_type = product_doc.type or ""
+        product_id = product_doc.id or product_id
+    else:
+        product_label = product_sku or product_id
+        product_brand = ""
+        product_type = ""
 
     return VendorConvoDTO(
         vendor={
@@ -462,9 +633,17 @@ def vendor_convo_from_state(
             "tier": "Tier-2",
             "mssa": "active",
         },
+        product={
+            "id": product_id,
+            "name": product_label,
+            "sku": product_sku,
+            "brand": product_brand,
+            "type": product_type,
+        },
         pr=workflow_id or rfq_id,
         workflowId=workflow_id,
         rfqId=rfq_id,
         outcome=outcome,
+        summary=summary,
         messages=messages,
     )

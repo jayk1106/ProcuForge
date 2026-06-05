@@ -89,6 +89,7 @@ def get_vendor_thread_query_service(
     vendor_repo: VendorRepositoryDep,
     rfq_index_repo: RfqIndexRepositoryDep,
     events_repo: WorkflowEventsRepositoryDep,
+    product_repo: ProductRepositoryDep,
 ) -> VendorThreadQueryService:
     return VendorThreadQueryService(
         settings=settings,
@@ -96,6 +97,7 @@ def get_vendor_thread_query_service(
         vendor_repo=vendor_repo,
         rfq_index_repo=rfq_index_repo,
         events_repo=events_repo,
+        product_repo=product_repo,
     )
 
 

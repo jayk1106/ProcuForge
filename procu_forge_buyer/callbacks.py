@@ -13,7 +13,11 @@ from google.adk.models.llm_request import LlmRequest
 from google.genai import types
 
 from .pr_status import PrStatus
-from .pr_status_transitions import STOP_PR_STATUSES, pr_status_line
+from .pr_status_transitions import (
+    STOP_PR_STATUSES,
+    pr_status_line,
+    sync_purchase_pr_status_from_acks,
+)
 from .state_keys import PLANNER_PLAN_KEY, PR_STATUS_KEY
 
 logger = logging.getLogger(__name__)
@@ -194,6 +198,29 @@ manage_log_before_pr_router = partial(
 manage_log_after_pr_router = partial(
     managed_log_after_handler, span="PR_ROUTER", detail_line=_pr_router_after, trailing_lines=None
 )
+
+_REPAIR_PURCHASE_STATUSES = frozenset(
+    {
+        PrStatus.VENDOR_SELECTED.value,
+        PrStatus.PO_ISSUED.value,
+        PrStatus.PO_ACKNOWLEDGED.value,
+        PrStatus.INVOICE_UNDER_VERIFICATION.value,
+    }
+)
+
+
+def repair_purchase_status_callback(callback_context: CallbackContext) -> None:
+    """Advance lagging purchase ``pr_status`` from ack keys without re-running tools."""
+    status = callback_context.state.get(PR_STATUS_KEY)
+    if status not in _REPAIR_PURCHASE_STATUSES:
+        return None
+    if sync_purchase_pr_status_from_acks(callback_context.state):
+        logger.info(
+            "purchase_status_repair session_id=%s pr_status=%s",
+            callback_context.session.id,
+            callback_context.state.get(PR_STATUS_KEY),
+        )
+    return None
 
 
 def stop_loop_if_terminal(callback_context: CallbackContext) -> types.Content | None:

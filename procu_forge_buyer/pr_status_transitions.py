@@ -7,9 +7,14 @@ from typing import Any, Mapping, MutableMapping
 
 from .pr_status import PrStatus
 from .state_keys import (
+    INVOICE_VENDOR_ACK_KEY,
     NEGOTIATION_CONFIG_KEY,
+    PO_VENDOR_ACK_KEY,
     PR_STATUS_KEY,
     PREVIOUS_PR_STATUS_KEY,
+    PROCESS_COMPLETE_VENDOR_ACK_KEY,
+    RFQ_CLOSED_LOSERS_KEY,
+    SELECTED_VENDOR_KEY,
     VENDOR_OFFERS_KEY,
 )
 
@@ -227,6 +232,95 @@ def transition_to_escalated(state: MutableMapping[str, Any]) -> None:
     if current in TERMINAL_PR_STATUSES:
         return
     _set(state, current, PrStatus.ESCALATED)
+
+
+def _losing_vendor_ids(state: Mapping[str, Any]) -> list[str]:
+    selected = state.get(SELECTED_VENDOR_KEY)
+    selected_id = None
+    if isinstance(selected, dict):
+        raw = selected.get("vendor")
+        if isinstance(raw, str) and raw.strip():
+            selected_id = raw.strip()
+    if not selected_id:
+        return []
+    nego = state.get(NEGOTIATION_CONFIG_KEY) or {}
+    if not isinstance(nego, dict):
+        return []
+    return [vid for vid in nego if vid != selected_id]
+
+
+def _all_losing_vendors_notified(state: Mapping[str, Any]) -> bool:
+    losing = _losing_vendor_ids(state)
+    if not losing:
+        return True
+    raw = state.get(RFQ_CLOSED_LOSERS_KEY) or {}
+    if not isinstance(raw, dict):
+        return False
+    closed = {str(k) for k, v in raw.items() if v}
+    return all(vid in closed for vid in losing)
+
+
+def sync_purchase_pr_status_from_acks(state: MutableMapping[str, Any]) -> bool:
+    """Advance purchase-phase ``pr_status`` from vendor-confirmed ack keys.
+
+    RFQ_CLOSED to losers is best-effort: ``po_vendor_ack`` alone can unblock
+    ``VENDOR_SELECTED`` → ``PO_ISSUED``. Returns True if any transition ran.
+    """
+    before = _parse_current(state.get(PR_STATUS_KEY))
+    changed = False
+
+    while True:
+        current = _parse_current(state.get(PR_STATUS_KEY))
+        if current == PrStatus.VENDOR_SELECTED:
+            can_issue = _all_losing_vendors_notified(state) or bool(
+                state.get(PO_VENDOR_ACK_KEY)
+            )
+            if not can_issue:
+                break
+            if state.get(PO_VENDOR_ACK_KEY) and not _all_losing_vendors_notified(state):
+                logger.warning(
+                    "rfq_closed_incomplete advancing on po_vendor_ack losers=%s closed=%s",
+                    _losing_vendor_ids(state),
+                    sorted((state.get(RFQ_CLOSED_LOSERS_KEY) or {}).keys()),
+                )
+            transition_to_po_issued(state)
+            if _parse_current(state.get(PR_STATUS_KEY)) != current:
+                changed = True
+            continue
+
+        if current == PrStatus.PO_ISSUED:
+            if not state.get(PO_VENDOR_ACK_KEY):
+                break
+            transition_to_po_acknowledged(state)
+            if _parse_current(state.get(PR_STATUS_KEY)) != current:
+                changed = True
+            continue
+
+        if current == PrStatus.PO_ACKNOWLEDGED:
+            if not state.get(INVOICE_VENDOR_ACK_KEY):
+                break
+            transition_to_invoice_under_verification(state)
+            if _parse_current(state.get(PR_STATUS_KEY)) != current:
+                changed = True
+            continue
+
+        if current == PrStatus.INVOICE_UNDER_VERIFICATION:
+            if not state.get(PROCESS_COMPLETE_VENDOR_ACK_KEY):
+                break
+            transition_to_completed(state)
+            if _parse_current(state.get(PR_STATUS_KEY)) != current:
+                changed = True
+            continue
+
+        break
+
+    if changed:
+        logger.info(
+            "purchase_status_sync %s -> %s",
+            before.value,
+            _parse_current(state.get(PR_STATUS_KEY)).value,
+        )
+    return changed
 
 
 # ── legacy stub (superseded by specific purchase-flow transitions above) ──────

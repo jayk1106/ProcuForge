@@ -26,7 +26,9 @@ from procu_forge_buyer.subagents.purchase_manager.callbacks import (
     purchase_manager_after_agent,
     purchase_manager_before_agent,
 )
+from procu_forge_buyer.pr_status_transitions import sync_purchase_pr_status_from_acks
 from procu_forge_buyer.subagents.purchase_manager.tools import (
+    _notify_losing_vendors,
     send_grn_created,
     send_po,
     send_process_complete,
@@ -298,9 +300,147 @@ def test_after_agent_advances_to_po_issued_when_losers_closed():
     assert state[PR_STATUS_KEY] == PrStatus.PO_ISSUED.value
 
 
-def test_stall_guard_escalates():
+def test_sync_advances_to_completed_all_acks_no_rfq_closed():
+    """All vendor ack keys set but losers never RFQ_CLOSED — still reaches COMPLETED."""
+    state = _base_state()
+    state[PR_STATUS_KEY] = PrStatus.VENDOR_SELECTED.value
+    state[SELECTED_VENDOR_KEY] = {"vendor": _WINNER_ID, "final_price": 30.88, "outcome": "ACCEPTED"}
+    state[NEGOTIATION_CONFIG_KEY][_WINNER_ID] = state[NEGOTIATION_CONFIG_KEY][_VENDOR_ID]
+    state[RFQ_CLOSED_LOSERS_KEY] = {}
+    state[PO_VENDOR_ACK_KEY] = {"message_type": "PO_ACKNOWLEDGED"}
+    state[INVOICE_VENDOR_ACK_KEY] = {"message_type": "INVOICE_SUBMITTED"}
+    state[PROCESS_COMPLETE_VENDOR_ACK_KEY] = {"message_type": "PROCESS_COMPLETE"}
+
+    assert sync_purchase_pr_status_from_acks(state) is True
+    assert state[PR_STATUS_KEY] == PrStatus.COMPLETED.value
+
+
+def test_sync_unblocks_with_po_ack_only():
+    """po_vendor_ack alone unblocks VENDOR_SELECTED without RFQ_CLOSED to losers."""
+    state = _base_state()
+    state[PR_STATUS_KEY] = PrStatus.VENDOR_SELECTED.value
+    state[SELECTED_VENDOR_KEY] = {"vendor": _WINNER_ID, "final_price": 30.88, "outcome": "ACCEPTED"}
+    state[NEGOTIATION_CONFIG_KEY][_WINNER_ID] = state[NEGOTIATION_CONFIG_KEY][_VENDOR_ID]
+    state[PO_VENDOR_ACK_KEY] = {"message_type": "PO_ACKNOWLEDGED"}
+
+    assert sync_purchase_pr_status_from_acks(state) is True
+    assert state[PR_STATUS_KEY] == PrStatus.PO_ACKNOWLEDGED.value
+
+
+async def test_notify_losing_vendors_plain_ok_ack():
+    state = _base_state()
+    state[SELECTED_VENDOR_KEY] = {"vendor": _WINNER_ID, "final_price": 30.88, "outcome": "ACCEPTED"}
+    state[NEGOTIATION_CONFIG_KEY][_WINNER_ID] = {
+        "rfq_id": "rfq-winner",
+        "product": {"id": "prod-1", "sku": "PI-OFF-0001", "quantity": 1, "currency": "USD"},
+        "communications": [],
+    }
+
+    with patch(
+        "procu_forge_buyer.subagents.purchase_manager.tools.call_vendor",
+        new_callable=AsyncMock,
+        return_value=json.dumps({"ok": True, "message": "RFQ_CLOSED acknowledged"}),
+    ):
+        result = await _notify_losing_vendors(state)
+
+    assert result["ok"] is True
+    assert state[RFQ_CLOSED_LOSERS_KEY][_VENDOR_ID] is True
+
+
+async def test_notify_losing_vendors_empty_reply_retry():
+    state = _base_state()
+    state[SELECTED_VENDOR_KEY] = {"vendor": _WINNER_ID, "final_price": 30.88, "outcome": "ACCEPTED"}
+    state[NEGOTIATION_CONFIG_KEY][_WINNER_ID] = {
+        "rfq_id": "rfq-winner",
+        "product": {"id": "prod-1", "sku": "PI-OFF-0001", "quantity": 1, "currency": "USD"},
+        "communications": [],
+    }
+
+    call_count = {"n": 0}
+
+    async def _side_effect(payload, rfq_id):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return ""
+        return json.dumps({"ok": True, "message": "RFQ_CLOSED acknowledged"})
+
+    with patch(
+        "procu_forge_buyer.subagents.purchase_manager.tools.call_vendor",
+        new_callable=AsyncMock,
+        side_effect=_side_effect,
+    ):
+        with patch(
+            "procu_forge_buyer.subagents.purchase_manager.tools.asyncio.sleep",
+            new_callable=AsyncMock,
+        ):
+            result = await _notify_losing_vendors(state)
+
+    assert call_count["n"] == 2
+    assert result["ok"] is True
+    assert state[RFQ_CLOSED_LOSERS_KEY][_VENDOR_ID] is True
+
+
+async def test_send_po_succeeds_when_rfq_closed_fails():
+    state = _base_state()
+    state[SELECTED_VENDOR_KEY] = {"vendor": _WINNER_ID, "final_price": 30.88, "outcome": "ACCEPTED"}
+    state[NEGOTIATION_CONFIG_KEY][_WINNER_ID] = {
+        "rfq_id": "rfq-winner",
+        "product": {"id": "prod-1", "sku": "PI-OFF-0001", "quantity": 1, "currency": "USD"},
+        "communications": [],
+    }
+    ctx = _tool_context(state)
+
+    async def _side_effect(payload, rfq_id):
+        env = json.loads(payload)
+        if env["message_type"] == "RFQ_CLOSED":
+            return ""
+        return _po_ack_reply(env["payload"]["po_number"])
+
+    with patch(
+        "procu_forge_buyer.subagents.purchase_manager.tools.call_vendor",
+        new_callable=AsyncMock,
+        side_effect=_side_effect,
+    ):
+        with patch(
+            "procu_forge_buyer.subagents.purchase_manager.tools.asyncio.sleep",
+            new_callable=AsyncMock,
+        ):
+            result = await send_po(ctx)
+
+    assert result["ok"] is True
+    assert state[PO_VENDOR_ACK_KEY]
+    assert result["rfq_closed"]["ok"] is False
+    assert result["rfq_closed"]["all_notified"] is False
+
+
+def test_after_agent_advances_to_completed_when_all_acks_present():
+    """after_agent uses sync helper to chain through to COMPLETED."""
+    state = _FakeState(
+        {
+            PR_STATUS_KEY: PrStatus.VENDOR_SELECTED.value,
+            SELECTED_VENDOR_KEY: {"vendor": _WINNER_ID, "final_price": 30.88, "outcome": "ACCEPTED"},
+            NEGOTIATION_CONFIG_KEY: _base_state()[NEGOTIATION_CONFIG_KEY],
+            RFQ_CLOSED_LOSERS_KEY: {},
+            PO_VENDOR_ACK_KEY: {"message_type": "PO_ACKNOWLEDGED"},
+            INVOICE_VENDOR_ACK_KEY: {"message_type": "INVOICE_SUBMITTED"},
+            PROCESS_COMPLETE_VENDOR_ACK_KEY: {"message_type": "PROCESS_COMPLETE"},
+            PURCHASE_STEP_SNAPSHOT_KEY: {},
+        }
+    )
+    state[NEGOTIATION_CONFIG_KEY][_WINNER_ID] = state[NEGOTIATION_CONFIG_KEY][_VENDOR_ID]
+    ctx = MagicMock()
+    ctx.state = state
+    ctx.session.id = "sess-complete"
+
+    purchase_manager_after_agent(ctx)
+
+    assert state[PR_STATUS_KEY] == PrStatus.COMPLETED.value
+
+
+def test_stall_guard_escalates_outside_purchase_phase():
+    """Stall escalation applies outside purchase-phase statuses, not during PO_ISSUED etc."""
     state = _FakeState({
-        PR_STATUS_KEY: PrStatus.PO_ISSUED.value,
+        PR_STATUS_KEY: PrStatus.NEGOTIATION_COMPLETED.value,
         PURCHASE_STEP_SNAPSHOT_KEY: {},
         PURCHASE_STALL_STREAK_KEY: 1,
     })
@@ -313,6 +453,23 @@ def test_stall_guard_escalates():
 
     assert state[PR_STATUS_KEY] == PrStatus.ESCALATED.value
     assert state[PURCHASE_STALL_STREAK_KEY] == 2
+
+
+def test_stall_guard_does_not_escalate_during_po_issued():
+    state = _FakeState({
+        PR_STATUS_KEY: PrStatus.PO_ISSUED.value,
+        PURCHASE_STEP_SNAPSHOT_KEY: {},
+        PURCHASE_STALL_STREAK_KEY: 1,
+    })
+    ctx = MagicMock()
+    ctx.state = state
+    ctx.session.id = "sess-stall-exempt"
+
+    purchase_manager_before_agent(ctx)
+    purchase_manager_after_agent(ctx)
+
+    assert state[PR_STATUS_KEY] == PrStatus.PO_ISSUED.value
+    assert state[PURCHASE_STALL_STREAK_KEY] == 1
 
 
 async def test_send_po_resends_when_ack_missing():

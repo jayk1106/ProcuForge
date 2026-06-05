@@ -9,6 +9,7 @@ grn_number) and re-calls the vendor.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -335,7 +336,7 @@ async def send_po(tool_context: ToolContext) -> dict[str, Any]:
         po_record.get("total_amount"),
     )
 
-    print("BUYER: send_po envelope", envelope)
+    _LOG.debug("purchase_manager send_po envelope %s", envelope)
 
     try:
         reply = await call_vendor(json.dumps(envelope), config["rfq_id"])
@@ -347,10 +348,9 @@ async def send_po(tool_context: ToolContext) -> dict[str, Any]:
         )
         return {"ok": False, "error": f"vendor A2A call failed: {exc}"}
 
-    print("BUYER: send_po reply", reply)
+    _LOG.debug("purchase_manager send_po reply_chars=%d", len(reply or ""))
 
     ack_env = parse_vendor_envelope(reply)
-    print("BUYER: send_po ack_env", ack_env)
     if ack_env is None:
         return {
             "ok": False,
@@ -437,7 +437,7 @@ async def send_grn_created(tool_context: ToolContext) -> dict[str, Any]:
         po_number,
     )
 
-    print("BUYER: send_grn envelope", envelope)
+    _LOG.debug("purchase_manager send_grn envelope %s", envelope)
     try:
         reply = await call_vendor(json.dumps(envelope), config["rfq_id"])
     except Exception as exc:
@@ -448,7 +448,7 @@ async def send_grn_created(tool_context: ToolContext) -> dict[str, Any]:
         )
         return {"ok": False, "error": f"vendor A2A call failed: {exc}"}
 
-    print("BUYER: send_grn reply", reply)
+    _LOG.debug("purchase_manager send_grn reply_chars=%d", len(reply or ""))
     inv_env = parse_vendor_envelope(reply)
     if inv_env is None:
         return {
@@ -555,12 +555,44 @@ async def send_process_complete(tool_context: ToolContext) -> dict[str, Any]:
     return {"ok": True, "process_complete_sent": envelope, "vendor_reply": pc_env}
 
 
+def _parse_rfq_closed_reply(reply: str) -> tuple[dict[str, Any] | None, str | None]:
+    """Return (parsed_ack, error) when a vendor accepted RFQ_CLOSED."""
+    parsed = parse_vendor_envelope(reply)
+    if parsed is None:
+        if not (reply or "").strip():
+            return None, "empty vendor reply"
+        return None, "vendor reply was not parseable JSON"
+    err = vendor_error(parsed)
+    if err:
+        return None, err
+    if parsed.get("ok") is True:
+        return parsed, None
+    message = str(parsed.get("message") or "")
+    if "RFQ_CLOSED" in message.upper():
+        return parsed, None
+    if parsed.get("message_type") == "RFQ_CLOSED":
+        return parsed, None
+    return None, "vendor did not acknowledge RFQ_CLOSED"
+
+
+async def _call_rfq_closed_with_retry(envelope_json: str, rfq_id: str) -> tuple[str, dict[str, Any] | None, str | None]:
+    """Call vendor for RFQ_CLOSED; retry once on empty reply."""
+    reply = await call_vendor(envelope_json, rfq_id)
+    parsed, err = _parse_rfq_closed_reply(reply)
+    if parsed is not None or (reply or "").strip():
+        return reply, parsed, err
+    await asyncio.sleep(0.5)
+    reply = await call_vendor(envelope_json, rfq_id)
+    parsed, err = _parse_rfq_closed_reply(reply)
+    return reply, parsed, err
+
+
 async def _notify_losing_vendors(state: Any) -> dict[str, Any]:
     """Send RFQ_CLOSED to every losing vendor that hasn't yet been notified.
 
     Called from inside ``send_po``. Idempotent per vendor: a vendor is marked
-    closed only when its reply parses as a well-formed envelope and is not an
-    ``ok=False`` error. ``state`` is the live ADK session state (mutated).
+    closed when its reply is a successful RFQ_CLOSED ack (full envelope or
+    vendor short-circuit ``ok: true``). ``state`` is the live ADK session state.
     """
     selected_vendor_id = _selected_vendor_id(state)
     if not selected_vendor_id:
@@ -595,7 +627,10 @@ async def _notify_losing_vendors(state: Any) -> dict[str, Any]:
                 outcome="NOT_SELECTED",
                 reason="ANOTHER_VENDOR_SELECTED",
             )
-            reply = await call_vendor(json.dumps(envelope), rfq_id)
+            reply, parsed, err = await _call_rfq_closed_with_retry(
+                json.dumps(envelope),
+                rfq_id,
+            )
         except Exception as exc:  # noqa: BLE001
             _LOG.warning(
                 "purchase_manager rfq_closed_failed  vendor_id=%s error=%s",
@@ -605,17 +640,12 @@ async def _notify_losing_vendors(state: Any) -> dict[str, Any]:
             results[vendor_id] = {"ok": False, "error": str(exc)}
             continue
 
-        parsed = parse_vendor_envelope(reply)
         if parsed is None:
             results[vendor_id] = {
                 "ok": False,
-                "error": "vendor reply was not parseable JSON",
+                "error": err or "RFQ_CLOSED not acknowledged",
                 "vendor_reply": reply[:500] if isinstance(reply, str) else reply,
             }
-            continue
-        err = vendor_error(parsed)
-        if err:
-            results[vendor_id] = {"ok": False, "error": err, "vendor_reply": parsed}
             continue
 
         closed_map[vendor_id] = True

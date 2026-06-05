@@ -50,10 +50,31 @@ class VendorThreadMessageDTO(BaseModel):
     from_agent: str = Field(alias="from")
     to_agent: str = Field(alias="to")
     type: str
-    phase: str
+    phase: str = ""
     locked: bool = False
     error: bool = False
     payload: dict[str, Any] = Field(default_factory=dict)
+    # Compact one-line summary derived from the payload (e.g. "$30.88 · qty 1").
+    highlight: str = ""
+    round: int | None = None
+
+
+class VendorThreadSummaryDTO(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+    status: str = ""
+    quoted_price: float | None = Field(default=None, alias="quotedPrice")
+    accepted_price: float | None = Field(default=None, alias="acceptedPrice")
+    latest_offer_price: float | None = Field(default=None, alias="latestOfferPrice")
+    last_selling_price: float | None = Field(default=None, alias="lastSellingPrice")
+    currency: str = "USD"
+    po_number: str | None = Field(default=None, alias="poNumber")
+    grn_number: str | None = Field(default=None, alias="grnNumber")
+    invoice_number: str | None = Field(default=None, alias="invoiceNumber")
+    # Promised delivery date from the PO.
+    expected_delivery: str | None = Field(default=None, alias="expectedDelivery")
+    # Actual goods-received date sourced from the GRN's ``received_at``.
+    delivered_on: str | None = Field(default=None, alias="deliveredOn")
 
 
 class VendorConvoDTO(BaseModel):
@@ -64,6 +85,8 @@ class VendorConvoDTO(BaseModel):
     workflow_id: str = Field(alias="workflowId")
     rfq_id: str = Field(alias="rfqId")
     outcome: str
+    product: dict[str, str] = Field(default_factory=dict)
+    summary: VendorThreadSummaryDTO = Field(default_factory=VendorThreadSummaryDTO)
     messages: list[VendorThreadMessageDTO]
 
 
