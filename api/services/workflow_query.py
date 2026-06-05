@@ -19,7 +19,12 @@ from db.collections.workflow_index import WorkflowIndexEntry
 from db.firestore.repositories.vendors import VendorRepository
 from db.firestore.repositories.workflow_events import WorkflowEventsRepository
 from db.firestore.repositories.workflow_index import WorkflowIndexRepository
-from procu_forge_buyer.state_keys import NEGOTIATION_CONFIG_KEY, PR_STATUS_KEY, REQUEST_KEY
+from procu_forge_buyer.state_keys import (
+    NEGOTIATION_CONFIG_KEY,
+    PR_STATUS_KEY,
+    REQUEST_KEY,
+    VENDOR_OFFERS_KEY,
+)
 
 
 class WorkflowQueryService:
@@ -97,6 +102,17 @@ class WorkflowQueryService:
             for vid, cfg in neg.items():
                 if isinstance(cfg, dict):
                     vendor_ids.append(str(cfg.get("vendor_id") or vid))
+        offers_blob = state.get(VENDOR_OFFERS_KEY)
+        if isinstance(offers_blob, dict):
+            offers = offers_blob.get("offers")
+            if isinstance(offers, list):
+                for offer in offers:
+                    if isinstance(offer, dict):
+                        vid = str(offer.get("vendorId") or offer.get("vendor_id") or "")
+                        if vid:
+                            vendor_ids.append(vid)
+        # Deduplicate while preserving order.
+        vendor_ids = list(dict.fromkeys(vendor_ids))
         vendor_names = await self._vendor_repo.get_many(vendor_ids)
 
         await self._lazy_upsert_index(workflow_id, state)

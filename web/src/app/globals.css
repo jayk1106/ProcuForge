@@ -595,6 +595,87 @@ a { color: inherit; text-decoration: none; }
 .banner .body .ctx { color: var(--ink-2); font-size: var(--t-sm); margin-top: 2px; }
 .banner .body .acts { margin-left: auto; display: flex; gap: 6px; }
 
+/* PO / GRN / Invoice structured display */
+.doc-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  padding: 14px 16px;
+  background: var(--bg);
+}
+.doc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px 18px;
+}
+.doc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.doc-field span:last-child {
+  font-size: var(--t-sm);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.doc-items {
+  border-top: 1px dashed var(--rule);
+  padding-top: 10px;
+}
+.doc-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.doc-table th,
+.doc-table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--rule);
+}
+.doc-table tbody tr:last-child td { border-bottom: 0; }
+
+/* discovered vendors (pre-negotiation shortlist) */
+.discovered-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+.discovered-col {
+  border: 1px solid var(--rule);
+  background: var(--bg);
+  border-radius: 2px;
+  display: flex;
+  flex-direction: column;
+}
+.discovered-col header {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--bg-tint);
+}
+.discovered-col header .vname { font-weight: 600; font-size: var(--t-sm); }
+.discovered-col header .vid { font-size: var(--t-xs); color: var(--faint); margin-top: 2px; }
+.discovered-col header .row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.discovered-summary {
+  padding: 12px 14px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 12px;
+  font-size: var(--t-sm);
+}
+.discovered-summary .k {
+  font-size: var(--t-xs);
+  color: var(--muted);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.discovered-summary .v { text-align: right; font-variant-numeric: tabular-nums; }
+.discovered-summary .v .muted { color: var(--muted); font-size: var(--t-xs); }
+
 /* vendor columns */
 .neg-board {
   display: grid;

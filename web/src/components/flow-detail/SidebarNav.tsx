@@ -38,9 +38,17 @@ function buildSections(flow: ActiveFlow | null | undefined, isEmpty: boolean): N
     flow?.specDone === false || isEmpty ? 'pending' : 'validated'
 
   const vendorCount = flow?.vendors.length ?? 0
-  let rfqSub = statusLabel(ps.rfq)
-  if (vendorCount > 0 && ps.rfq !== 'walked') {
-    rfqSub = `${vendorCount} vendor${vendorCount === 1 ? '' : 's'} responded`
+  const discoveredCount = flow?.discoveredVendors?.length ?? 0
+  let discoveredSub = statusLabel(ps.rfq)
+  let discoveredStatus: PhaseStatus = ps.rfq
+  if (discoveredCount > 0) {
+    discoveredSub = `${discoveredCount} vendor${discoveredCount === 1 ? '' : 's'}`
+    discoveredStatus = 'done'
+  } else if (ps.rfq === 'walked') {
+    discoveredSub = 'none found'
+  } else if (ps.rfq !== 'pending') {
+    discoveredSub = 'searching catalog'
+    discoveredStatus = 'in_progress'
   }
 
   let negSub = statusLabel(ps.neg)
@@ -77,7 +85,7 @@ function buildSections(flow: ActiveFlow | null | undefined, isEmpty: boolean): N
 
   return [
     { id: 'spec', n: '1.0', label: 'Specification', sub: specSub, status: specSub === 'validated' ? 'done' : 'pending' },
-    { id: 'rfq', n: '2.0', label: 'RFQ', sub: rfqSub, status: ps.rfq },
+    { id: 'discovered', n: '2.0', label: 'Vendors discovered', sub: discoveredSub, status: discoveredStatus },
     { id: 'neg', n: '3.0', label: 'Negotiation', sub: negSub, status: ps.neg },
     { id: 'award', n: '3.5', label: 'Selected vendor', sub: awardSub, status: awardStatus },
     { id: 'po', n: '4.0', label: 'Purchase order', sub: poFinal, status: ps.po },

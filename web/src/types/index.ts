@@ -52,6 +52,20 @@ export interface ActivityItem {
 
 export type PhaseStatus = 'pending' | 'in_progress' | 'done' | 'walked'
 
+export interface DiscoveredVendor {
+  offerId: string
+  vendorId: string
+  name: string
+  country: string
+  sku: string
+  unit: string
+  unitPrice: number | null
+  currency: string
+  leadTimeDays: number | null
+  contracted: boolean
+  availabilityStatus: string
+}
+
 export interface ActiveFlow {
   id: string
   requestId?: string
@@ -69,6 +83,7 @@ export interface ActiveFlow {
   currentPhase: PhaseId
   needsAction?: boolean
   actionLabel?: string | null
+  discoveredVendors?: DiscoveredVendor[]
   vendors: ActiveVendor[]
   activity: ActivityItem[]
   po?: Record<string, unknown> | null

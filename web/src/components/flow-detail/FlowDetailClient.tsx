@@ -12,6 +12,8 @@ import { Timeline } from './Timeline'
 import { SidebarNav } from './SidebarNav'
 import { ActivityRail } from './ActivityRail'
 import { NegotiationBoard } from './NegotiationBoard'
+import { DiscoveredVendorsBoard } from './DiscoveredVendorsBoard'
+import { PoCard, GrnCard, InvoiceCard } from './DocumentCards'
 import { ActionBanner } from './ActionBanner'
 import { StateDebugPanel } from '@/components/primitives/StateDebugPanel'
 
@@ -160,6 +162,7 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
   const showAction = flow.needsAction
 
   const vendorCount = flow.vendors.length
+  const discoveredCount = flow.discoveredVendors?.length ?? 0
   const winner = selectedVendorName(flow)
 
   const negPill: PhasePillSpec = (() => {
@@ -288,33 +291,31 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
                 </Section>
               </div>
 
-              <div id="sec-rfq">
+              <div id="sec-discovered">
                 <Section
-                  title="RFQ — request for quote"
+                  title="Vendors discovered"
                   num="2.0"
-                  defaultOpen={false}
-                  pending={phaseStatus.rfq === 'pending'}
+                  defaultOpen={discoveredCount > 0 && vendorCount === 0}
+                  pending={discoveredCount === 0 && phaseStatus.rfq === 'pending'}
                   status={(() => {
-                    const p = pillForStatus(phaseStatus.rfq, {
-                      done: vendorCount > 0 ? `${vendorCount} responded` : 'completed',
-                      inProgress: vendorCount > 0
-                        ? `collecting · ${vendorCount} responded`
-                        : 'collecting quotes',
-                      pending: 'pending',
-                      walked: 'no vendors found',
-                    })
-                    return <StatusPill kind={p.kind}>{p.text}</StatusPill>
+                    if (discoveredCount === 0 && phaseStatus.rfq === 'walked') {
+                      return <StatusPill kind="err">no vendors found</StatusPill>
+                    }
+                    if (discoveredCount === 0) {
+                      return <StatusPill kind="idle">searching catalog</StatusPill>
+                    }
+                    const kind: 'ok' | 'go' = vendorCount > 0 ? 'ok' : 'go'
+                    const text =
+                      vendorCount > 0
+                        ? `${discoveredCount} shortlisted`
+                        : `${discoveredCount} ready to negotiate`
+                    return <StatusPill kind={kind}>{text}</StatusPill>
                   })()}
                 >
-                  {vendorCount > 0 ? (
-                    <div className="kv">
-                      <div className="k">Vendors invited</div>
-                      <div className="v">{vendorCount}</div>
-                      <div className="k">Responded</div>
-                      <div className="v">{vendorCount}</div>
-                    </div>
+                  {discoveredCount > 0 ? (
+                    <DiscoveredVendorsBoard vendors={flow.discoveredVendors ?? []} />
                   ) : (
-                    <PendingPlaceholder label="Awaiting vendor responses." />
+                    <PendingPlaceholder label="Vendor search agent is scanning the catalog." />
                   )}
                 </Section>
               </div>
@@ -355,7 +356,7 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
                   status={<StatusPill kind={poPill.kind}>{poPill.text}</StatusPill>}
                 >
                   {flow.po ? (
-                    <pre className="t-xs">{JSON.stringify(flow.po, null, 2)}</pre>
+                    <PoCard po={flow.po as Record<string, unknown>} />
                   ) : (
                     <PendingPlaceholder label="PO will be issued after approval." />
                   )}
@@ -371,7 +372,7 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
                   status={<StatusPill kind={grnPill.kind}>{grnPill.text}</StatusPill>}
                 >
                   {grn ? (
-                    <pre className="t-xs">{JSON.stringify(grn, null, 2)}</pre>
+                    <GrnCard grn={grn as Record<string, unknown>} />
                   ) : (
                     <PendingPlaceholder label="Awaiting goods receipt from vendor." />
                   )}
@@ -387,7 +388,7 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
                   status={<StatusPill kind={invPill.kind}>{invPill.text}</StatusPill>}
                 >
                   {invoice ? (
-                    <pre className="t-xs">{JSON.stringify(invoice, null, 2)}</pre>
+                    <InvoiceCard invoice={invoice as Record<string, unknown>} />
                   ) : (
                     <PendingPlaceholder label="Awaiting vendor invoice." />
                   )}

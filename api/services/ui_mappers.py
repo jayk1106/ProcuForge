@@ -8,6 +8,7 @@ from typing import Any
 from api.schemas.ui_dto import (
     ActiveVendorDTO,
     ActivityItemDTO,
+    DiscoveredVendorDTO,
     VendorConvoDTO,
     VendorThreadMessageDTO,
     VendorThreadRowDTO,
@@ -219,6 +220,18 @@ def workflow_detail_from_state(
     if isinstance(selected, dict):
         selected_vendor_id = str(_get(selected, "vendor", default="") or "") or None
 
+    offers_blob = state.get(VENDOR_OFFERS_KEY)
+    offer_by_vendor: dict[str, dict[str, Any]] = {}
+    if isinstance(offers_blob, dict):
+        offer_list = offers_blob.get("offers")
+        if isinstance(offer_list, list):
+            for offer in offer_list:
+                if not isinstance(offer, dict):
+                    continue
+                vid = str(_get(offer, "vendorId", "vendor_id", default=""))
+                if vid:
+                    offer_by_vendor[vid] = offer
+
     overrides = _thread_overrides(state)
     neg_config = state.get(NEGOTIATION_CONFIG_KEY)
     vendors: list[ActiveVendorDTO] = []
@@ -242,7 +255,10 @@ def workflow_detail_from_state(
                 override=overrides.get(rfq_id) if rfq_id else None,
             )
             prod = cfg.get("product") if isinstance(cfg.get("product"), dict) else {}
-            lead_days = _get(prod, "lead_time_days", "leadTimeDays")
+            offer = offer_by_vendor.get(vendor_id, {})
+            lead_days = _get(prod, "lead_time_days", "leadTimeDays") or _get(
+                offer, "leadTimeDays", "lead_time_days"
+            )
             moq = _get(prod, "minimum_order_qty", "minimumOrderQty", default=1)
 
             vendors.append(
@@ -291,6 +307,30 @@ def workflow_detail_from_state(
     request_id = _get(request, "request_id", "requestId", default=workflow_id)
     title = _get(product, "name", default=request_id)
 
+    discovered: list[DiscoveredVendorDTO] = []
+    for vid, offer in offer_by_vendor.items():
+        vendor_doc = vendor_names.get(vid)
+        unit_price = _coerce_float(_get(offer, "unitPrice", "unit_price"))
+        lead_raw = _get(offer, "leadTimeDays", "lead_time_days")
+        lead_days = int(lead_raw) if isinstance(lead_raw, (int, float)) else None
+        discovered.append(
+            DiscoveredVendorDTO(
+                offerId=str(_get(offer, "id", default=vid)),
+                vendorId=vid,
+                name=vendor_doc.name if vendor_doc else vid,
+                country=_vendor_country(vendor_doc),
+                sku=str(_get(offer, "vendorSku", "vendor_sku", default="") or ""),
+                unit=str(_get(offer, "unit", default="") or ""),
+                unitPrice=unit_price,
+                currency=str(_get(offer, "currency", default="USD") or "USD"),
+                leadTimeDays=lead_days,
+                contracted=bool(offer.get("contracted")),
+                availabilityStatus=str(
+                    _get(offer, "availabilityStatus", "availability_status", default="") or ""
+                ),
+            )
+        )
+
     return WorkflowDetailDTO(
         id=workflow_id,
         requestId=str(request_id),
@@ -315,6 +355,7 @@ def workflow_detail_from_state(
         currentPhase=pr_status_to_phase_id(pr_status),
         needsAction=needs_action(pr_status),
         actionLabel=action_label(pr_status),
+        discoveredVendors=discovered,
         vendors=vendors,
         activity=activity,
         po=state.get(PO_KEY) if isinstance(state.get(PO_KEY), dict) else None,

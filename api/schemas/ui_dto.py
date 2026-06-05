@@ -114,6 +114,24 @@ class ActivityItemDTO(BaseModel):
     det: str
 
 
+class DiscoveredVendorDTO(BaseModel):
+    """A catalog offer the buyer discovered before negotiation begins."""
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+    offer_id: str = Field(alias="offerId")
+    vendor_id: str = Field(alias="vendorId")
+    name: str
+    country: str = "—"
+    sku: str = ""
+    unit: str = ""
+    unit_price: float | None = Field(default=None, alias="unitPrice")
+    currency: str = "USD"
+    lead_time_days: int | None = Field(default=None, alias="leadTimeDays")
+    contracted: bool = False
+    availability: str = Field(default="", alias="availabilityStatus")
+
+
 class WorkflowDetailDTO(BaseModel):
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
@@ -133,6 +151,9 @@ class WorkflowDetailDTO(BaseModel):
     current_phase: str = Field(alias="currentPhase")
     needs_action: bool = Field(alias="needsAction")
     action_label: str | None = Field(default=None, alias="actionLabel")
+    discovered_vendors: list[DiscoveredVendorDTO] = Field(
+        default_factory=list, alias="discoveredVendors"
+    )
     vendors: list[ActiveVendorDTO] = Field(default_factory=list)
     activity: list[ActivityItemDTO] = Field(default_factory=list)
     po: dict[str, Any] | None = None
