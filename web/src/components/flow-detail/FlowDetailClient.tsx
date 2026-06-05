@@ -16,8 +16,7 @@ import { DiscoveredVendorsBoard } from './DiscoveredVendorsBoard'
 import { PoCard, GrnCard, InvoiceCard } from './DocumentCards'
 import { ActionBanner } from './ActionBanner'
 import { StateDebugPanel } from '@/components/primitives/StateDebugPanel'
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
+import { useWorkflowSocket } from '@/hooks/useWorkflowSocket'
 
 interface FlowDetailClientProps {
   workflowId: string
@@ -52,21 +51,20 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
   const router = useRouter()
   const { openChat } = useChatContext()
   const [flow, setFlow] = useState<ActiveFlow | null>(null)
-  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [approving, setApproving] = useState(false)
   const [activeSec, setActiveSec] = useState('neg')
 
+  // load() only mutates `flow`/`error`; no loading flag. The render below
+  // shows a splash only while `flow` is null, so WS-driven updates and
+  // refresh clicks update in place without an interstitial.
   const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
     try {
       const data = await getWorkflowDetail(workflowId)
       setFlow(data)
+      setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load workflow')
-    } finally {
-      setLoading(false)
     }
   }, [workflowId])
 
@@ -74,38 +72,21 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
     load()
   }, [load])
 
-  useEffect(() => {
-    let cancelled = false
-    let ws: WebSocket | null = null
-    try {
-      const wsBase = API_URL.replace(/^http/, 'ws')
-      ws = new WebSocket(`${wsBase}/ws/workflow/${workflowId}`)
-      ws.onmessage = () => {
-        if (!cancelled) load()
-      }
-      ws.onerror = () => {
-        // ignore; refresh button still works
-      }
-    } catch {
-      // ignore
-    }
-    return () => {
-      cancelled = true
-      if (ws) {
-        try {
-          ws.close()
-        } catch {
-          // ignore
-        }
-      }
-    }
-  }, [workflowId, load])
+  useWorkflowSocket<ActiveFlow>(`/ws/workflow/${workflowId}`, {
+    onState: (next) => {
+      setFlow(next)
+      setError(null)
+    },
+    debugLabel: 'flow',
+  })
 
   async function handleApprove() {
     setApproving(true)
     try {
       await approveWorkflow(workflowId)
-      await load()
+      // No explicit re-fetch: the buyer agent's next state_delta event will
+      // push a fresh DTO over WS. If it doesn't arrive within ~2s, the user
+      // can hit refresh.
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Approval failed')
     } finally {
@@ -134,25 +115,28 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
     [flow?.phaseStatus]
   )
 
-  if (loading) {
+  if (!flow) {
+    if (error) {
+      return (
+        <div className="viewport">
+          <div className="empty" style={{ marginTop: 40 }}>
+            <pre className="ascii-mark">──── error ────</pre>
+            <div>{error}</div>
+            <button
+              className="btn"
+              style={{ marginTop: 12 }}
+              onClick={() => router.push('/flows')}
+            >
+              [ back to flows ]
+            </button>
+          </div>
+        </div>
+      )
+    }
     return (
       <div className="viewport">
         <div className="thinking" style={{ marginTop: 40 }}>
           loading workflow…
-        </div>
-      </div>
-    )
-  }
-
-  if (error || !flow) {
-    return (
-      <div className="viewport">
-        <div className="empty" style={{ marginTop: 40 }}>
-          <pre className="ascii-mark">──── error ────</pre>
-          <div>{error ?? 'Workflow not found'}</div>
-          <button className="btn" style={{ marginTop: 12 }} onClick={() => router.push('/flows')}>
-            [ back to flows ]
-          </button>
         </div>
       </div>
     )

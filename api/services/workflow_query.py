@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
@@ -25,6 +26,8 @@ from procu_forge_buyer.state_keys import (
     REQUEST_KEY,
     VENDOR_OFFERS_KEY,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class WorkflowQueryService:
@@ -96,33 +99,13 @@ class WorkflowQueryService:
             )
         state = session.state if isinstance(session.state, dict) else {}
 
-        vendor_ids: list[str] = []
-        neg = state.get(NEGOTIATION_CONFIG_KEY)
-        if isinstance(neg, dict):
-            for vid, cfg in neg.items():
-                if isinstance(cfg, dict):
-                    vendor_ids.append(str(cfg.get("vendor_id") or vid))
-        offers_blob = state.get(VENDOR_OFFERS_KEY)
-        if isinstance(offers_blob, dict):
-            offers = offers_blob.get("offers")
-            if isinstance(offers, list):
-                for offer in offers:
-                    if isinstance(offer, dict):
-                        vid = str(offer.get("vendorId") or offer.get("vendor_id") or "")
-                        if vid:
-                            vendor_ids.append(vid)
-        # Deduplicate while preserving order.
-        vendor_ids = list(dict.fromkeys(vendor_ids))
-        vendor_names = await self._vendor_repo.get_many(vendor_ids)
-
         await self._lazy_upsert_index(workflow_id, state)
 
-        events = await self._events_repo.list_for_workflow(workflow_id)
-        return workflow_detail_from_state(
+        return await _assemble_workflow_detail(
             workflow_id,
             state,
-            vendor_names=vendor_names,
-            events=events,
+            vendor_repo=self._vendor_repo,
+            events_repo=self._events_repo,
         )
 
     async def get_workflow_state(self, workflow_id: str) -> dict:
@@ -183,3 +166,90 @@ def _index_action_label(pr_status: str) -> str | None:
     from api.services.status_mapping import action_label
 
     return action_label(parse_pr_status(pr_status))
+
+
+async def _assemble_workflow_detail(
+    workflow_id: str,
+    state: dict,
+    *,
+    vendor_repo: VendorRepository,
+    events_repo: WorkflowEventsRepository,
+) -> WorkflowDetailDTO:
+    """Build a WorkflowDetailDTO from already-loaded session state.
+
+    Shared by the REST handler and the WS factory so the two stay in sync.
+    """
+    vendor_ids: list[str] = []
+    neg = state.get(NEGOTIATION_CONFIG_KEY)
+    if isinstance(neg, dict):
+        for vid, cfg in neg.items():
+            if isinstance(cfg, dict):
+                vendor_ids.append(str(cfg.get("vendor_id") or vid))
+    offers_blob = state.get(VENDOR_OFFERS_KEY)
+    if isinstance(offers_blob, dict):
+        offers = offers_blob.get("offers")
+        if isinstance(offers, list):
+            for offer in offers:
+                if isinstance(offer, dict):
+                    vid = str(offer.get("vendorId") or offer.get("vendor_id") or "")
+                    if vid:
+                        vendor_ids.append(vid)
+    vendor_ids = list(dict.fromkeys(vendor_ids))
+    vendor_names = await vendor_repo.get_many(vendor_ids)
+    events = await events_repo.list_for_workflow(workflow_id)
+    return workflow_detail_from_state(
+        workflow_id,
+        state,
+        vendor_names=vendor_names,
+        events=events,
+    )
+
+
+async def build_workflow_detail(workflow_id: str) -> WorkflowDetailDTO | None:
+    """Module-level factory for WS state-changed broadcasts.
+
+    Reads the WS context registry, fetches the buyer session, and assembles
+    the same DTO the REST handler returns. Returns ``None`` if the WS
+    context hasn't been initialized or the session is missing — the
+    connection manager treats ``None`` as "skip this broadcast".
+    """
+    from api.ws.context import get_ws_context
+
+    ctx = get_ws_context()
+    if ctx is None:
+        logger.debug(
+            "workflow_query.build_workflow_detail.no_ws_context workflow_id=%s",
+            workflow_id,
+        )
+        return None
+
+    try:
+        session = await ctx.buyer_reader.get_session(workflow_id)
+    except Exception:
+        logger.exception(
+            "workflow_query.build_workflow_detail.session_read_failed workflow_id=%s",
+            workflow_id,
+        )
+        return None
+
+    if session is None:
+        logger.debug(
+            "workflow_query.build_workflow_detail.session_missing workflow_id=%s",
+            workflow_id,
+        )
+        return None
+
+    state = session.state if isinstance(session.state, dict) else {}
+    try:
+        return await _assemble_workflow_detail(
+            workflow_id,
+            state,
+            vendor_repo=ctx.vendor_repo,
+            events_repo=ctx.events_repo,
+        )
+    except Exception:
+        logger.exception(
+            "workflow_query.build_workflow_detail.assemble_failed workflow_id=%s",
+            workflow_id,
+        )
+        return None

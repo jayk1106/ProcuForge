@@ -110,7 +110,23 @@ class WorkflowService:
     def run_agent(self, job: AgentJob) -> None:
         """Run the buyer agent synchronously. Invoked by FastAPI BackgroundTasks
         on the thread pool, so the synchronous ADK iterator does not block the loop.
+
+        Every event the Runner emits with a non-empty ``actions.state_delta`` is
+        a buyer state mutation. After each such event we schedule a debounced
+        ``state_changed`` broadcast on the workflow channel; the connection
+        manager collapses bursts and dedupes identical DTOs.
         """
+        from api.services.workflow_query import build_workflow_detail
+        from api.ws import broadcast_state
+
+        def _emit_state(reason: str) -> None:
+            broadcast_state(
+                job.workflow_id,
+                lambda: build_workflow_detail(job.workflow_id),
+                reason=reason,
+                workflow_id=job.workflow_id,
+            )
+
         try:
             from google.adk.runners import Runner
             from google.adk.sessions import VertexAiSessionService
@@ -149,6 +165,16 @@ class WorkflowService:
                 session_id=job.workflow_id,
                 new_message=message,
             ):
+                actions = getattr(event, "actions", None)
+                state_delta = getattr(actions, "state_delta", None) if actions else None
+                if state_delta:
+                    logger.debug(
+                        "workflow.run.state_delta workflow_id=%s keys=%s",
+                        job.workflow_id,
+                        list(state_delta.keys()),
+                    )
+                    _emit_state("runner_state_delta")
+
                 if logger.isEnabledFor(logging.DEBUG):
                     is_final = (
                         event.is_final_response()
@@ -167,6 +193,9 @@ class WorkflowService:
                         job.workflow_id,
                     )
 
+            # Safety: catch any nested mutations that didn't surface as a
+            # top-level state_delta on the events we observed.
+            _emit_state("runner_complete")
             logger.info("workflow.run.complete workflow_id=%s", job.workflow_id)
         except Exception:
             logger.exception(
@@ -236,6 +265,16 @@ class WorkflowService:
             ),
         )
         await session_service.append_event(session, state_event)
+
+        from api.services.workflow_query import build_workflow_detail
+        from api.ws import broadcast_state
+
+        broadcast_state(
+            workflow_id,
+            lambda: build_workflow_detail(workflow_id),
+            reason="approve",
+            workflow_id=workflow_id,
+        )
 
         approved_at = datetime.now(timezone.utc)
         if self._index_repo is not None:

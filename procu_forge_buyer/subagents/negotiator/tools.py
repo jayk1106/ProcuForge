@@ -299,6 +299,26 @@ async def negotiate_with_vendor(
         payload=inbound_payload,
     )
 
+    try:
+        from api.services.vendor_thread_query import build_vendor_convo
+        from api.ws import broadcast_state, vendor_thread_channel
+
+        _rfq_id_str = str(config["rfq_id"])
+        _wf_id = tool_context.session.id
+        broadcast_state(
+            vendor_thread_channel(_rfq_id_str),
+            lambda rid=_rfq_id_str: build_vendor_convo(rid),
+            reason="negotiation_reply",
+            workflow_id=_wf_id,
+            vendor_thread_id=_rfq_id_str,
+        )
+    except Exception:
+        _LOG.exception(
+            "negotiator.tools.broadcast_failed rfq_id=%s vendor_id=%s",
+            config.get("rfq_id"),
+            vendor_id,
+        )
+
     _log_after_vendor_call(config, round, reply)
 
     return {

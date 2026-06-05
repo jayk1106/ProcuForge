@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
@@ -11,7 +12,7 @@ from api.schemas.ui_dto import VendorConvoDTO, VendorThreadRowDTO
 from api.schemas.vendor_thread_status import VendorThreadStatus
 from api.services.session_reader import BuyerSessionReader, VendorSessionReader
 from api.services.ui_mappers import vendor_convo_from_state, vendor_thread_rows_from_state
-from api.ws import publish
+from api.ws import broadcast_state, record_event, vendor_thread_channel
 from db.firestore.repositories.products import ProductRepository
 from db.firestore.repositories.rfq_index import RfqIndexRepository
 from db.firestore.repositories.vendors import VendorRepository
@@ -23,6 +24,7 @@ from procu_forge_buyer.state_keys import (
 )
 
 logger_name = __name__
+logger = logging.getLogger(__name__)
 
 
 class VendorThreadQueryService:
@@ -103,32 +105,22 @@ class VendorThreadQueryService:
                 detail=f"Vendor thread '{rfq_id}' not found.",
             )
 
-        session = await self._vendor_reader.get_session(rfq_id, vendor_id)
-        if session is None:
+        dto = await _assemble_vendor_convo(
+            rfq_id,
+            workflow_id=workflow_id,
+            vendor_id=vendor_id,
+            vendor_reader=self._vendor_reader,
+            buyer_reader=self._buyer_reader,
+            vendor_repo=self._vendor_repo,
+            product_repo=self._product_repo,
+            events_repo=self._events_repo,
+        )
+        if dto is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Vendor session for rfq '{rfq_id}' not found.",
             )
-
-        state = session.state if isinstance(session.state, dict) else {}
-        vendor_doc = await self._vendor_repo.get(vendor_id)
-        product_doc = None
-        product = state.get("product") if isinstance(state.get("product"), dict) else {}
-        product_id = str(product.get("id") or "") if isinstance(product, dict) else ""
-        if product_id and self._product_repo is not None:
-            try:
-                product_doc = await self._product_repo.get(product_id)
-            except Exception:  # noqa: BLE001 — soft-fail; UI falls back to SKU/id from state
-                product_doc = None
-        events = await self._events_repo.list_for_vendor_thread(workflow_id, rfq_id)
-        return vendor_convo_from_state(
-            rfq_id,
-            state,
-            workflow_id=workflow_id,
-            vendor_doc=vendor_doc,
-            product_doc=product_doc,
-            events=events,
-        )
+        return dto
 
     async def get_thread_state(self, rfq_id: str) -> dict:
         """Return raw vendor and buyer session state for debugging."""
@@ -161,6 +153,7 @@ class VendorThreadQueryService:
             reason=reason,
             event_type="vendor_thread_escalated",
             api_author="api:escalate",
+            broadcast_reason="override_escalate",
         )
 
     async def walk_away(self, rfq_id: str, reason: str | None = None) -> dict:
@@ -170,6 +163,7 @@ class VendorThreadQueryService:
             reason=reason,
             event_type="vendor_thread_walked_away",
             api_author="api:walk_away",
+            broadcast_reason="override_walk_away",
         )
 
     async def _apply_override(
@@ -180,6 +174,7 @@ class VendorThreadQueryService:
         reason: str | None,
         event_type: str,
         api_author: str,
+        broadcast_reason: str,
     ) -> dict:
         self._ensure_configured()
 
@@ -229,7 +224,7 @@ class VendorThreadQueryService:
             ),
         )
 
-        publish(
+        record_event(
             workflow_id,
             event_type,
             {
@@ -240,6 +235,20 @@ class VendorThreadQueryService:
             },
             vendor_thread_id=rfq_id,
             author=api_author,
+        )
+
+        broadcast_state(
+            workflow_id,
+            lambda: _factory_buyer(workflow_id),
+            reason=f"{broadcast_reason}_buyer",
+            workflow_id=workflow_id,
+        )
+        broadcast_state(
+            vendor_thread_channel(rfq_id),
+            lambda: build_vendor_convo(rfq_id),
+            reason=f"{broadcast_reason}_vendor",
+            workflow_id=workflow_id,
+            vendor_thread_id=rfq_id,
         )
 
         return {
@@ -287,3 +296,125 @@ class VendorThreadQueryService:
                     vendor_id = str(cfg.get("vendor_id") or vid)
                     return wf_entry.workflow_id, vendor_id
         return "", ""
+
+
+def _override_for_rfq(buyer_state: dict, rfq_id: str) -> dict | None:
+    overrides = buyer_state.get(VENDOR_THREAD_OVERRIDES_KEY)
+    if not isinstance(overrides, dict):
+        return None
+    entry = overrides.get(rfq_id)
+    return entry if isinstance(entry, dict) else None
+
+
+async def _assemble_vendor_convo(
+    rfq_id: str,
+    *,
+    workflow_id: str,
+    vendor_id: str,
+    vendor_reader: VendorSessionReader,
+    buyer_reader: BuyerSessionReader,
+    vendor_repo: VendorRepository,
+    product_repo: ProductRepository | None,
+    events_repo: WorkflowEventsRepository,
+) -> VendorConvoDTO | None:
+    """Shared by the REST handler and the WS factory.
+
+    Returns ``None`` if the vendor session is missing; the REST handler
+    promotes ``None`` to a 404 while the WS path silently skips the
+    broadcast.
+    """
+    session = await vendor_reader.get_session(rfq_id, vendor_id)
+    if session is None:
+        return None
+
+    state = session.state if isinstance(session.state, dict) else {}
+    vendor_doc = await vendor_repo.get(vendor_id)
+    product_doc = None
+    product = state.get("product") if isinstance(state.get("product"), dict) else {}
+    product_id = str(product.get("id") or "") if isinstance(product, dict) else ""
+    if product_id and product_repo is not None:
+        try:
+            product_doc = await product_repo.get(product_id)
+        except Exception:  # noqa: BLE001 — soft-fail; UI falls back to SKU/id from state
+            product_doc = None
+    events = await events_repo.list_for_vendor_thread(workflow_id, rfq_id)
+
+    override: dict | None = None
+    if workflow_id:
+        try:
+            buyer_session = await buyer_reader.get_session(workflow_id)
+        except Exception:  # noqa: BLE001 — override is optional
+            buyer_session = None
+        if buyer_session is not None:
+            buyer_state = (
+                buyer_session.state if isinstance(buyer_session.state, dict) else {}
+            )
+            override = _override_for_rfq(buyer_state, rfq_id)
+
+    return vendor_convo_from_state(
+        rfq_id,
+        state,
+        workflow_id=workflow_id,
+        vendor_doc=vendor_doc,
+        product_doc=product_doc,
+        events=events,
+        override=override,
+    )
+
+
+async def build_vendor_convo(rfq_id: str) -> VendorConvoDTO | None:
+    """Module-level factory for ``state_changed`` broadcasts on vt: channels.
+
+    Resolves rfq → workflow/vendor via the rfq_index and assembles the same
+    DTO ``get_thread`` returns. Returns ``None`` if the WS context is unset,
+    the rfq cannot be resolved, or the vendor session is missing.
+    """
+    from api.ws.context import get_ws_context
+
+    ctx = get_ws_context()
+    if ctx is None:
+        logger.debug(
+            "vendor_thread_query.build_vendor_convo.no_ws_context rfq_id=%s",
+            rfq_id,
+        )
+        return None
+
+    try:
+        entry = await ctx.rfq_index_repo.get(rfq_id)
+    except Exception:
+        logger.exception(
+            "vendor_thread_query.build_vendor_convo.rfq_lookup_failed rfq_id=%s",
+            rfq_id,
+        )
+        return None
+    if entry is None:
+        logger.debug(
+            "vendor_thread_query.build_vendor_convo.rfq_unresolved rfq_id=%s",
+            rfq_id,
+        )
+        return None
+
+    try:
+        return await _assemble_vendor_convo(
+            rfq_id,
+            workflow_id=entry.workflow_id,
+            vendor_id=entry.vendor_id,
+            vendor_reader=ctx.vendor_reader,
+            buyer_reader=ctx.buyer_reader,
+            vendor_repo=ctx.vendor_repo,
+            product_repo=ctx.product_repo,
+            events_repo=ctx.events_repo,
+        )
+    except Exception:
+        logger.exception(
+            "vendor_thread_query.build_vendor_convo.assemble_failed rfq_id=%s",
+            rfq_id,
+        )
+        return None
+
+
+async def _factory_buyer(workflow_id: str):
+    """Lazy import shim so vendor_thread_query doesn't depend on workflow_query at import time."""
+    from api.services.workflow_query import build_workflow_detail
+
+    return await build_workflow_detail(workflow_id)

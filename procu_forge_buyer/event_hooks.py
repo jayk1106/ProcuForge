@@ -58,14 +58,22 @@ async def record_vendor_thread_initiated(
         )
 
     try:
-        from api.ws import publish
+        from api.services.vendor_thread_query import build_vendor_convo
+        from api.ws import broadcast_state, record_event, vendor_thread_channel
 
-        publish(
+        record_event(
             workflow_id,
             "vendor_thread_initiated",
             {"vendor_id": vendor_id, "rfq_id": rfq_id},
             vendor_thread_id=rfq_id,
             author="buyer",
+        )
+        broadcast_state(
+            vendor_thread_channel(rfq_id),
+            lambda: build_vendor_convo(rfq_id),
+            reason="thread_initiated",
+            workflow_id=workflow_id,
+            vendor_thread_id=rfq_id,
         )
     except Exception:
         logger.exception(
@@ -93,9 +101,9 @@ def publish_vendor_message(
     if not workflow_id or not rfq_id:
         return
     try:
-        from api.ws import publish
+        from api.ws import record_event
 
-        publish(
+        record_event(
             workflow_id,
             f"vendor_message_{direction}",
             {

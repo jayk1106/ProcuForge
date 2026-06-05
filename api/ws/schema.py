@@ -14,6 +14,10 @@ class WorkflowEvent(BaseModel):
     When ``vendor_thread_id`` is set, the event is also fanned out to
     subscribers of that vendor thread (key ``vt:{vendor_thread_id}`` in the
     connection manager).
+
+    ``seq`` is a per-channel monotonic counter set by the connection manager
+    for ``state_changed`` frames. Granular Firestore-audit events leave it
+    unset.
     """
 
     workflow_id: str
@@ -22,3 +26,4 @@ class WorkflowEvent(BaseModel):
     vendor_thread_id: str | None = None
     author: str | None = None
     data: dict[str, Any] = Field(default_factory=dict)
+    seq: int | None = None

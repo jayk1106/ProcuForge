@@ -1,5 +1,5 @@
 'use client'
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   escalateVendorThread,
@@ -12,16 +12,10 @@ import { AsciiRule } from '@/components/primitives/AsciiRule'
 import { StateDebugPanel } from '@/components/primitives/StateDebugPanel'
 import { FilterChip } from '@/components/primitives/FilterChip'
 import { StatusPill } from '@/components/primitives/StatusPill'
+import { useWorkflowSocket } from '@/hooks/useWorkflowSocket'
 
 interface VendorDetailClientProps {
   rfqId: string
-}
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
-
-function buildWsUrl(path: string): string {
-  const wsBase = API_URL.replace(/^http/, 'ws')
-  return `${wsBase}${path}`
 }
 
 const TERMINAL_OUTCOMES = new Set([
@@ -365,22 +359,21 @@ function SummaryStat({
 export function VendorDetailClient({ rfqId }: VendorDetailClientProps) {
   const router = useRouter()
   const [convo, setConvo] = useState<VendorConvo | null>(null)
-  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showRaw, setShowRaw] = useState<Record<number, boolean>>({})
   const [acting, setActing] = useState<null | 'escalate' | 'walk-away'>(null)
   const [actionError, setActionError] = useState<string | null>(null)
-  const wsRef = useRef<WebSocket | null>(null)
 
+  // load() mutates `convo`/`error` only. Render below renders a splash only
+  // while `convo` is null; once data exists, WS updates and refresh calls
+  // patch in place without an interstitial.
   const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
     try {
-      setConvo(await getVendorThread(rfqId))
+      const next = await getVendorThread(rfqId)
+      setConvo(next)
+      setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load vendor thread')
-    } finally {
-      setLoading(false)
     }
   }, [rfqId])
 
@@ -388,33 +381,13 @@ export function VendorDetailClient({ rfqId }: VendorDetailClientProps) {
     load()
   }, [load])
 
-  useEffect(() => {
-    let cancelled = false
-    let ws: WebSocket | null = null
-    try {
-      ws = new WebSocket(buildWsUrl(`/ws/vendor-threads/${rfqId}`))
-      wsRef.current = ws
-      ws.onmessage = () => {
-        if (!cancelled) load()
-      }
-      ws.onerror = () => {
-        // Swallow; the read path still works via refresh button.
-      }
-    } catch {
-      // ignore
-    }
-    return () => {
-      cancelled = true
-      if (ws) {
-        try {
-          ws.close()
-        } catch {
-          // ignore
-        }
-      }
-      wsRef.current = null
-    }
-  }, [rfqId, load])
+  useWorkflowSocket<VendorConvo>(`/ws/vendor-threads/${rfqId}`, {
+    onState: (next) => {
+      setConvo(next)
+      setError(null)
+    },
+    debugLabel: 'vendor',
+  })
 
   function toggle(i: number) {
     setShowRaw((s) => ({ ...s, [i]: !s[i] }))
@@ -425,7 +398,8 @@ export function VendorDetailClient({ rfqId }: VendorDetailClientProps) {
     setActionError(null)
     try {
       await escalateVendorThread(rfqId)
-      await load()
+      // No explicit re-fetch: server broadcasts state_changed on both
+      // channels right after the override is appended.
     } catch (e) {
       setActionError(e instanceof Error ? e.message : 'Escalate failed')
     } finally {
@@ -439,7 +413,6 @@ export function VendorDetailClient({ rfqId }: VendorDetailClientProps) {
     setActionError(null)
     try {
       await walkAwayVendorThread(rfqId)
-      await load()
     } catch (e) {
       setActionError(e instanceof Error ? e.message : 'Walk-away failed')
     } finally {
@@ -447,25 +420,28 @@ export function VendorDetailClient({ rfqId }: VendorDetailClientProps) {
     }
   }
 
-  if (loading) {
+  if (!convo) {
+    if (error) {
+      return (
+        <div className="viewport">
+          <div className="empty" style={{ marginTop: 40 }}>
+            <pre className="ascii-mark">──── error ────</pre>
+            <div>{error}</div>
+            <button
+              className="btn"
+              style={{ marginTop: 12 }}
+              onClick={() => router.push('/vendors')}
+            >
+              [ back to vendors ]
+            </button>
+          </div>
+        </div>
+      )
+    }
     return (
       <div className="viewport">
         <div className="thinking" style={{ marginTop: 40 }}>
           loading vendor thread…
-        </div>
-      </div>
-    )
-  }
-
-  if (error || !convo) {
-    return (
-      <div className="viewport">
-        <div className="empty" style={{ marginTop: 40 }}>
-          <pre className="ascii-mark">──── error ────</pre>
-          <div>{error ?? 'Thread not found'}</div>
-          <button className="btn" style={{ marginTop: 12 }} onClick={() => router.push('/vendors')}>
-            [ back to vendors ]
-          </button>
         </div>
       </div>
     )

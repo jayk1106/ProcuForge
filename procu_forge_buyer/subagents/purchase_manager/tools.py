@@ -46,6 +46,36 @@ from procu_forge_buyer.state_keys import (
 _LOG = logging.getLogger(__name__)
 
 
+def _broadcast_vendor_thread(
+    tool_context: ToolContext,
+    config: dict[str, Any],
+    *,
+    reason: str,
+) -> None:
+    """Fire-and-forget vt:{rfq_id} state push. Swallows all errors."""
+    try:
+        from api.services.vendor_thread_query import build_vendor_convo
+        from api.ws import broadcast_state, vendor_thread_channel
+
+        rfq_id = str(config.get("rfq_id") or "")
+        if not rfq_id:
+            return
+        workflow_id = tool_context.session.id
+        broadcast_state(
+            vendor_thread_channel(rfq_id),
+            lambda rid=rfq_id: build_vendor_convo(rid),
+            reason=reason,
+            workflow_id=workflow_id,
+            vendor_thread_id=rfq_id,
+        )
+    except Exception:
+        _LOG.exception(
+            "purchase_manager.broadcast_failed reason=%s rfq_id=%s",
+            reason,
+            config.get("rfq_id"),
+        )
+
+
 class _StateReader(Protocol):
     """Minimal session-state interface (plain dict or ADK ``State``)."""
 
@@ -369,6 +399,7 @@ async def send_po(tool_context: ToolContext) -> dict[str, Any]:
         }
 
     tool_context.state[PO_VENDOR_ACK_KEY] = ack_env
+    _broadcast_vendor_thread(tool_context, config, reason="po_sent")
     return {
         "ok": True,
         "po_sent": envelope,
@@ -471,6 +502,7 @@ async def send_grn_created(tool_context: ToolContext) -> dict[str, Any]:
 
     tool_context.state[INVOICE_KEY] = invoice_payload
     tool_context.state[INVOICE_VENDOR_ACK_KEY] = inv_env
+    _broadcast_vendor_thread(tool_context, config, reason="grn_sent")
 
     return {
         "ok": True,
@@ -551,6 +583,7 @@ async def send_process_complete(tool_context: ToolContext) -> dict[str, Any]:
         "invoice_number": invoice_number,
     }
     tool_context.state[PROCESS_COMPLETE_VENDOR_ACK_KEY] = pc_env
+    _broadcast_vendor_thread(tool_context, config, reason="process_complete")
 
     return {"ok": True, "process_complete_sent": envelope, "vendor_reply": pc_env}
 

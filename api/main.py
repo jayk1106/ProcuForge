@@ -12,6 +12,7 @@ from api.config import APISettings, get_api_settings
 from api.logging_config import configure_app_logging
 from api.routers import health, products, test, vendor_threads, workflow, ws as ws_router
 from api.ws import manager as ws_manager
+from api.ws.context import init_ws_context
 
 load_dotenv()
 configure_app_logging()
@@ -22,6 +23,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Capture the main event loop so sync publishers (ADK callbacks running
     # on BackgroundTasks worker threads) can bridge onto it safely.
     ws_manager.bind_loop(asyncio.get_running_loop())
+    # Pre-build the WS context registry so factories can construct DTOs
+    # without dragging the FastAPI dependency graph into deep call sites.
+    init_ws_context()
 
     settings = get_api_settings()
     if settings.environment != "development":

@@ -604,6 +604,7 @@ def vendor_convo_from_state(
     vendor_doc: Vendor | None = None,
     product_doc: Product | None = None,
     events: list[WorkflowEventDoc] | None = None,  # noqa: ARG001 — kept for ABI
+    override: dict[str, Any] | None = None,
 ) -> VendorConvoDTO:
     """Build the conversation DTO from the vendor session state.
 
@@ -611,6 +612,11 @@ def vendor_convo_from_state(
     (negotiation + fulfillment) the vendor processed for this rfq. Workflow
     events are intentionally not used here because they only cover negotiation
     traffic emitted by the buyer's negotiator subagent.
+
+    ``override`` carries a buyer-side status override (escalate / walk-away)
+    pulled from the buyer session's ``vendor_thread_overrides`` map. When
+    present it supersedes the vendor session status in both ``outcome`` and
+    ``summary.status`` so the UI reflects the buyer action immediately.
     """
     vendor_id = str(state.get("vendor_id") or "")
     status = str(state.get("status") or "UNKNOWN")
@@ -652,6 +658,12 @@ def vendor_convo_from_state(
     outcome = status
     if state.get("accepted_price"):
         outcome = f"ACCEPTED @ {state['accepted_price']}"
+
+    if override is not None:
+        override_status = str(override.get("status") or "").strip()
+        if override_status:
+            outcome = override_status
+            summary = summary.model_copy(update={"status": override_status})
 
     product_state = product if isinstance(product, dict) else {}
     product_id = str(product_state.get("id") or "") if product_state else ""
