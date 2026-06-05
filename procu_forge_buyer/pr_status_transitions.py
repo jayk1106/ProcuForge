@@ -29,8 +29,9 @@ TERMINAL_PR_STATUSES: frozenset[PrStatus] = frozenset(
 HUMAN_GATED_PR_STATUSES: frozenset[PrStatus] = frozenset(
     {
         PrStatus.ESCALATED,
-        # PrStatus.AWAITING_USER_APPROVAL removed for automated happy-path testing.
-        # Add it back (with po_approval_shown gate logic) when re-introducing HITL.
+        # AWAITING_USER_APPROVAL is not in this set: the API's /approve endpoint
+        # advances it to PO_ISSUED directly via a state_delta event, so the agent
+        # never needs to gate on it. The enum value is retained for API consumers.
         PrStatus.READY_FOR_PAYMENT,
         # Vendor-driven or external-trigger states: stop the loop, require API action to resume
         PrStatus.AWAITING_DELIVERY,
@@ -180,17 +181,16 @@ def transition_after_decision(state: MutableMapping[str, Any]) -> None:
 # ── purchase flow ─────────────────────────────────────────────────────────────
 
 def transition_to_awaiting_user_approval(state: MutableMapping[str, Any]) -> None:
-    """VENDOR_SELECTED -> AWAITING_USER_APPROVAL (human gate before PO issuance)."""
-    current = _parse_current(state.get(PR_STATUS_KEY))
-    if current != PrStatus.VENDOR_SELECTED:
-        return
-    _set(state, current, PrStatus.AWAITING_USER_APPROVAL)
+    """Legacy alias: automated flow skips approval and issues the PO immediately."""
+    transition_to_po_issued(state)
 
 
 def transition_to_po_issued(state: MutableMapping[str, Any]) -> None:
-    """AWAITING_USER_APPROVAL -> PO_ISSUED after human approves the selected vendor."""
+    """Advance to PO_ISSUED once a vendor is selected (no human approval step)."""
     current = _parse_current(state.get(PR_STATUS_KEY))
-    if current != PrStatus.AWAITING_USER_APPROVAL:
+    if current == PrStatus.PO_ISSUED:
+        return
+    if current not in (PrStatus.VENDOR_SELECTED, PrStatus.AWAITING_USER_APPROVAL):
         return
     _set(state, current, PrStatus.PO_ISSUED)
 
@@ -217,6 +217,16 @@ def transition_to_completed(state: MutableMapping[str, Any]) -> None:
     if current != PrStatus.INVOICE_UNDER_VERIFICATION:
         return
     _set(state, current, PrStatus.COMPLETED)
+
+
+def transition_to_escalated(state: MutableMapping[str, Any]) -> None:
+    """Move to ESCALATED when an automated step stalls or cannot be recovered."""
+    current = _parse_current(state.get(PR_STATUS_KEY))
+    if current == PrStatus.ESCALATED:
+        return
+    if current in TERMINAL_PR_STATUSES:
+        return
+    _set(state, current, PrStatus.ESCALATED)
 
 
 # ── legacy stub (superseded by specific purchase-flow transitions above) ──────

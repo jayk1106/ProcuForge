@@ -19,10 +19,10 @@ Your goal: route incoming buyer messages to the correct sub-agent based on the m
 Routing rules:
 - **RFQ** -> delegate to **quote_agent** to produce an initial quote via `quote_product`.
 - **COUNTER_OFFER** or **ACCEPT** -> delegate to **negotiation_agent** to handle pricing via `get_negotiation_context` and `send_response`.
-- **PO** -> delegate to **purchase_manager_agent** to acknowledge the PO via `acknowledge_po`.
 - **GRN_CREATED** -> delegate to **purchase_manager_agent** to submit an invoice via `submit_invoice`.
 
 No-response message types (handled by `before_agent_callback`, do not delegate):
+- **PO** — validated, persisted, and **PO_ACKNOWLEDGED** returned automatically.
 - **WALKAWAY** (from buyer) - buyer ended the negotiation; thread is auto-closed.
 - **RFQ_CLOSED** - thread closure acknowledgement only.
 - **PROCESS_COMPLETE** - lifecycle terminator, no envelope sent back.

@@ -125,6 +125,25 @@ def _ack_reply(text: str) -> types.Content:
     return types.Content(role="model", parts=[types.Part(text=text)])
 
 
+def _po_ack_envelope(state: Any, po_payload: dict[str, Any]) -> dict[str, Any]:
+    """Build a PO_ACKNOWLEDGED envelope from persisted vendor session state."""
+    product = state.get(PRODUCT_KEY) or {}
+    builder = A2AMessageBuilder(
+        rfq_id=state.get(RFQ_ID_KEY) or "",
+        vendor_id=state.get(VENDOR_ID_KEY) or "",
+        product_id=product.get("id") or "",
+        sku=product.get("sku") or "",
+        quantity=int(product.get("quantity") or 1),
+        unit=product.get("unit") or "",
+        currency=product.get("currency") or "USD",
+        from_agent=VENDOR_AGENT,
+        to_agent=BUYER_AGENT,
+    )
+    return builder.get_po_acknowledged_payload(
+        po_number=str(po_payload.get("po_number") or "")
+    )
+
+
 def _deadline_violation(deadline_raw: Any) -> dict[str, Any] | None:
     """Return an error dict when ``deadline_raw`` is in the past, else ``None``.
 
@@ -431,9 +450,15 @@ def before_agent_callback(callback_context: CallbackContext) -> types.Content | 
         if current_status == VendorThreadStatus.ACCEPTED:
             logger.info("vendor_accept_already_confirmed  skipping redundant LLM delegation")
             return _ack_reply(json.dumps({"ok": True, "message": "ACCEPT already confirmed."}))
-        # Do NOT write ACCEPTED_PRICE_KEY here — the outbound vendor ACCEPT envelope
-        # (emitted by negotiation/callback.py) is the authoritative source so the
-        # agreed price is the vendor's confirmed price, not the buyer's inbound value.
+        # Seed agreed price from the buyer's ACCEPT when not yet set (vendor echo may
+        # not run if we short-circuit above). PO validation uses this vs line_items.
+        if callback_context.state.get(ACCEPTED_PRICE_KEY) is None:
+            unit_price = payload.get("unit_price")
+            if unit_price is not None:
+                try:
+                    callback_context.state[ACCEPTED_PRICE_KEY] = float(unit_price)
+                except (TypeError, ValueError):
+                    pass
         set_status(callback_context.state, VendorThreadStatus.ACCEPTED)
         return None
 
@@ -479,14 +504,43 @@ def before_agent_callback(callback_context: CallbackContext) -> types.Content | 
         )
 
     if message_type == MessageType.PO:
+        if body.get("from_agent") and body.get("from_agent") != BUYER_AGENT:
+            return _ack_reply(json.dumps({
+                "ok": False,
+                "error": "po_from_agent_invalid",
+                "from_agent": body.get("from_agent"),
+            }))
         po_error = _validate_po(payload, callback_context.state)
         if po_error:
             return _ack_reply(json.dumps(po_error))
         callback_context.state[PO_KEY] = payload
         set_status(callback_context.state, VendorThreadStatus.PO_RECEIVED)
-        return None
+        ack_envelope = _po_ack_envelope(callback_context.state, payload)
+        communications.append(ack_envelope)
+        callback_context.state[COMMUNICATION_KEY] = communications
+        set_status(callback_context.state, VendorThreadStatus.PO_ACKNOWLEDGED)
+        logger.info(
+            "vendor_po_auto_ack  rfq_id=%s po_number=%s",
+            callback_context.state.get(RFQ_ID_KEY),
+            payload.get("po_number"),
+        )
+        return _ack_reply(json.dumps(ack_envelope))
 
     if message_type == MessageType.GRN_CREATED:
+        grn_current = get_status(callback_context.state)
+        if grn_current != VendorThreadStatus.PO_ACKNOWLEDGED:
+            logger.warning(
+                "vendor_grn_out_of_order  current=%s", grn_current
+            )
+            return _ack_reply(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "error": "grn_out_of_order",
+                        "current_status": str(grn_current) if grn_current else None,
+                    }
+                )
+            )
         grn_error = _validate_grn(payload, callback_context.state)
         if grn_error:
             return _ack_reply(json.dumps(grn_error))

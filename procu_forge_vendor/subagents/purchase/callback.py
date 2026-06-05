@@ -11,7 +11,6 @@ from procu_forge_vendor.state_keys import COMMUNICATION_KEY
 
 
 _STATUS_BY_OUTBOUND_TYPE = {
-    MessageType.PO_ACKNOWLEDGED: VendorThreadStatus.PO_ACKNOWLEDGED,
     MessageType.INVOICE_SUBMITTED: VendorThreadStatus.INVOICE_SUBMITTED,
 }
 
@@ -19,9 +18,8 @@ _STATUS_BY_OUTBOUND_TYPE = {
 def after_agent_callback(callback_context: CallbackContext) -> types.Content | None:
     """Persist the outbound purchase-manager envelope and advance status.
 
-    Status transitions:
-    - PO_ACKNOWLEDGED -> PO_ACKNOWLEDGED
-    - INVOICE_SUBMITTED -> INVOICE_SUBMITTED
+    Only outbound type is INVOICE_SUBMITTED (PO acknowledgement is auto-handled
+    by the orchestrator's before_agent_callback before any subagent runs).
 
     Control returns to the orchestrator naturally on subagent completion;
     no explicit ``transfer_to_agent`` is needed (matches quote / negotiation

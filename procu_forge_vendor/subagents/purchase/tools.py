@@ -32,48 +32,14 @@ def _builder(tool_context: ToolContext) -> A2AMessageBuilder:
     )
 
 
-def acknowledge_po(tool_context: ToolContext) -> dict[str, Any]:
-    """Acknowledge an incoming purchase order.
-
-    Reads the PO payload from state["po"] (set by before_agent_callback when
-    the PO message arrived). Builds a slim PO_ACKNOWLEDGED envelope
-    (``{ "po_number": ... }``) and writes it to state["temp:response_body"]
-    for the after_agent_callback to send.
-
-    Returns ``{"ok": True, ...}`` on success (envelope queued for A2A delivery via
-    callback), or ``{"ok": False, "error": ...}`` on failure.
-    """
-    if not tool_context.state.get(VENDOR_ID_KEY):
-        return {"ok": False, "error": "vendor_id not found in session state"}
-
-    po = dict(tool_context.state.get(PO_KEY) or {})
-    if not po:
-        return {"ok": False, "error": "No PO found in state — ensure a PO message was received"}
-
-    po_number = po.get("po_number") or ""
-    if not po_number:
-        return {"ok": False, "error": "po_number missing from PO payload"}
-
-    builder = _builder(tool_context)
-    envelope = builder.get_po_acknowledged_payload(po_number=po_number)
-
-    tool_context.state["temp:response_body"] = envelope
-    return {
-        "ok": True,
-        "message_type": envelope.get("message_type"),
-        "message_id": envelope.get("message_id"),
-    }
-
-
 def submit_invoice(tool_context: ToolContext) -> dict[str, Any]:
     """Build and submit an invoice based on the received GRN.
 
     Joins GRN line items (``sku`` + ``unit_quantity``) against the PO's
-    ``line_items`` (``unit_price`` per sku). The PO is the contractual
-    source of truth for pricing; the GRN is the source of truth for
-    received quantity. Returns ``{"ok": false, ...}`` when a GRN sku is
-    not present in the PO so the discrepancy is surfaced rather than
-    invoiced at the wrong price.
+    ``line_items`` (``unit_price`` per sku). The PO is the contractual source of
+    truth for pricing; the GRN is the source of truth for received quantity.
+    Returns ``{"ok": false, ...}`` when a GRN sku is not present in the PO so
+    the discrepancy is surfaced rather than invoiced at the wrong price.
     """
     if not tool_context.state.get(VENDOR_ID_KEY):
         return {"ok": False, "error": "vendor_id not found in session state"}
@@ -160,4 +126,4 @@ def submit_invoice(tool_context: ToolContext) -> dict[str, Any]:
     }
 
 
-__all__ = ["acknowledge_po", "submit_invoice"]
+__all__ = ["submit_invoice"]

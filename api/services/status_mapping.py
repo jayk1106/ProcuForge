@@ -30,10 +30,14 @@ def pr_status_to_phase_label(status: PrStatus) -> PhaseLabel:
         PrStatus.NEGOTIATION_COMPLETED,
         PrStatus.VENDOR_SELECTED,
         PrStatus.NO_VENDOR_AVAILABLE,
-        PrStatus.AWAITING_USER_APPROVAL,
     }:
         return "NEG"
-    if status in {PrStatus.PO_ISSUED, PrStatus.PO_ACKNOWLEDGED, PrStatus.PO_REJECTED}:
+    if status in {
+        PrStatus.AWAITING_USER_APPROVAL,
+        PrStatus.PO_ISSUED,
+        PrStatus.PO_ACKNOWLEDGED,
+        PrStatus.PO_REJECTED,
+    }:
         return "PO"
     if status in {PrStatus.AWAITING_DELIVERY, PrStatus.GOODS_RECEIVED}:
         return "GRN"
@@ -101,8 +105,6 @@ def needs_action(status: PrStatus) -> bool:
 
 
 def action_label(status: PrStatus) -> str | None:
-    if status == PrStatus.AWAITING_USER_APPROVAL:
-        return "Approve final selection"
     if status == PrStatus.ESCALATED:
         return "Review escalation"
     if status == PrStatus.READY_FOR_PAYMENT:

@@ -5,36 +5,27 @@ from __future__ import annotations
 from functools import partial
 from typing import Any
 
+from functools import partial
+
 from google.adk.agents.callback_context import CallbackContext
-from google.adk.models.llm_request import LlmRequest
-from google.genai import types
 
 from ...callbacks import (
     _plan_summary,
     _request_id,
-    _session_state_dict,
-    _state_json_for_injection,
+    inject_session_state_before_model,
     managed_log_after_handler,
     managed_log_before_handler,
 )
 from ...state_keys import PLANNER_PLAN_KEY
 
 
-def inject_planner_session_state_before_model(
-    callback_context: CallbackContext,
-    llm_request: LlmRequest,
-) -> None:
-    """Append session state JSON so the planner model sees request/product and current plan."""
-    payload = _state_json_for_injection(_session_state_dict(callback_context))
-    text = (
+inject_planner_session_state_before_model = partial(
+    inject_session_state_before_model,
+    preamble=(
         "Current ADK session.state (JSON, authoritative). Prefer these keys over "
-        "guessing from the short tool `request` string alone:\n\n"
-        f"```json\n{payload}\n```"
-    )
-    llm_request.contents.append(
-        types.Content(role="user", parts=[types.Part(text=text)])
-    )
-    return None
+        "guessing from the short tool `request` string alone:"
+    ),
+)
 
 
 def _planner_before(ctx: CallbackContext, st: dict[str, Any]) -> str:

@@ -9,6 +9,7 @@ from functools import partial
 from typing import Any
 
 from google.adk.agents.callback_context import CallbackContext
+from google.adk.models.llm_request import LlmRequest
 from google.genai import types
 
 from .pr_status import PrStatus
@@ -24,6 +25,25 @@ _STOP_PR_STATUS_VALUES = frozenset(s.value for s in STOP_PR_STATUSES)
 
 def _session_state_dict(callback_context: CallbackContext) -> dict[str, Any]:
     return callback_context.state.to_dict()
+
+
+def inject_session_state_before_model(
+    callback_context: CallbackContext,
+    llm_request: LlmRequest,
+    *,
+    preamble: str | None = None,
+) -> None:
+    """Append session.state JSON so a subagent model sees authoritative workflow state."""
+    payload = _state_json_for_injection(_session_state_dict(callback_context))
+    intro = preamble or (
+        "Current ADK session.state (JSON, authoritative). Prefer these keys over "
+        "guessing from prior turns alone:"
+    )
+    text = f"{intro}\n\n```json\n{payload}\n```"
+    llm_request.contents.append(
+        types.Content(role="user", parts=[types.Part(text=text)])
+    )
+    return None
 
 
 def _state_json_for_injection(data: dict[str, Any]) -> str:

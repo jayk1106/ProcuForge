@@ -27,3 +27,6 @@ name = "procuforge"
 description = "Caveman grunt agent — compress verbose text to terse technical grunts"
 base_template = "adk"
 agent_directory = "master"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

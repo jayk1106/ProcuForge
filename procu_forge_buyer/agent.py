@@ -49,10 +49,10 @@ Authoritative lifecycle: **docs/request_status.md**.
 - **NEGOTIATION_COMPLETED** — **transfer_to_agent** ``decision_agent`` (required next step after negotiation).
 - **NO_VENDOR_AVAILABLE** — Do not delegate; terminal.
 - **VENDOR_SELECTED** — **transfer_to_agent** ``purchase_manager_agent``.
-- **AWAITING_USER_APPROVAL** — **transfer_to_agent** ``purchase_manager_agent`` so it
-  can call **approve_po** and advance to **PO_ISSUED**.
 - **PO_ISSUED**, **PO_ACKNOWLEDGED**, **INVOICE_UNDER_VERIFICATION** — **transfer_to_agent**
   ``purchase_manager_agent``.
+- **AWAITING_USER_APPROVAL** — **transfer_to_agent** ``purchase_manager_agent`` (legacy;
+  advances to **PO_ISSUED** automatically).
 - **AWAITING_DELIVERY**, **GOODS_RECEIVED**, **AWAITING_INVOICE**,
   **INVOICE_CORRECTION_PENDING**, **INVOICE_VERIFIED**, **PO_REJECTED** — Do not delegate;
   human gate or external trigger required (**pr_status** stops the loop).
