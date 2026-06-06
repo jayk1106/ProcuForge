@@ -5,8 +5,23 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "google-adk>=1.31.1",
+    "fastapi>=0.128.0",
+    "google-adk[a2a]>=1.31.1",
+    "jsonschema>=4.26.0",
+    "google-cloud-firestore>=2.21.0",
+    "pydantic>=2.13.3",
+    "pydantic-settings>=2.12.0",
     "python-dotenv>=1.2.2",
+    "uvicorn[standard]>=0.40.0",
+    "vertexai>=1.43.0",
+    "adk-database-memory[sqlite]>=0.1.0",
+    "google-cloud-logging>=3.11.0",
+    "google-cloud-storage>=2.18.0",
+    "google-cloud-trace>=1.13.0",
+    "opentelemetry-sdk>=1.27.0",
+    "opentelemetry-exporter-gcp-trace>=1.7.0",
+    "bcrypt>=4.1",
+    "PyJWT>=2.8",
 ]
 
 [tool.agents-cli]
@@ -14,3 +29,6 @@ name = "procuforge"
 description = "Caveman grunt agent — compress verbose text to terse technical grunts"
 base_template = "adk"
 agent_directory = "master"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

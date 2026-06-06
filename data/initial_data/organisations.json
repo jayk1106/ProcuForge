@@ -1,0 +1,16 @@
+[
+  {
+    "id": "1a15ffe3-e95c-49cf-b544-bc7df751922a",
+    "name": "RatelX",
+    "address": {
+      "country": "USA",
+      "state": "California",
+      "city": "San Francisco"
+    },
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  }
+]

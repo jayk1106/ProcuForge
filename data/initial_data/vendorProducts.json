@@ -1,0 +1,762 @@
+[
+  {
+    "id": "44a0a717-a833-475c-9f21-4c91a06aa33a",
+    "vendorId": "8ba9dcc8-6a12-4c68-8811-b60840d72abd",
+    "productId": "952845d3-4e38-4d7e-a116-7b152d603ce9",
+    "vendorSku": "SU-OFF-0001",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 32.5,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 4,
+    "contracted": true,
+    "availabilityStatus": "in_stock",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "b23eef65-28cd-45d8-a572-f7a154e215bc",
+    "vendorId": "5fbebce3-8715-4150-8f14-3def51d54208",
+    "productId": "952845d3-4e38-4d7e-a116-7b152d603ce9",
+    "vendorSku": "PI-OFF-0001",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 32.5,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 4,
+    "contracted": true,
+    "availabilityStatus": "in_stock",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "eb3746d8-9d44-46f9-878c-3af0091318f7",
+    "vendorId": "e8f6f7bf-8197-4cf2-a389-2580b6994eaa",
+    "productId": "3308925d-f02c-40d0-9bd9-fb964836742a",
+    "vendorSku": "PR-OFF-0001",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 34.5,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 5,
+    "contracted": true,
+    "availabilityStatus": "in_stock",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "689f34ef-1f2f-4ff3-9547-ea447459bd32",
+    "vendorId": "d39c51a0-7834-4758-9e11-234f033c47c8",
+    "productId": "3308925d-f02c-40d0-9bd9-fb964836742a",
+    "vendorSku": "BR-OFF-0001",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 34.5,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 5,
+    "contracted": true,
+    "availabilityStatus": "in_stock",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "aea5e801-4425-485b-9ac2-4897496e5d6c",
+    "vendorId": "de1f11a1-a2e9-4da1-85db-8d04e8baebb0",
+    "productId": "4677d1fd-c12a-49a2-8292-3dd367e42315",
+    "vendorSku": "CI-OFF-0001",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 36.5,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 6,
+    "contracted": true,
+    "availabilityStatus": "in_stock",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "79941dd3-c401-442b-998d-b18a4aa772c8",
+    "vendorId": "8065175f-c9f3-4e2e-b2c1-1091178538fb",
+    "productId": "4677d1fd-c12a-49a2-8292-3dd367e42315",
+    "vendorSku": "AT-OFF-0001",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 36.5,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 6,
+    "contracted": false,
+    "availabilityStatus": "in_stock",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "302ef5fc-7f3e-4528-9df8-d01bf0131955",
+    "vendorId": "5fbebce3-8715-4150-8f14-3def51d54208",
+    "productId": "87d67126-16ba-4c8e-be1f-8a8d7b80f2fe",
+    "vendorSku": "PI-OFF-0002",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 39.0,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 7,
+    "contracted": true,
+    "availabilityStatus": "in_stock",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "9559dbe8-9245-4ab8-9d8d-30af7e84c21b",
+    "vendorId": "fab8f4ca-40d2-4e8a-9aac-978e92a94ee9",
+    "productId": "87d67126-16ba-4c8e-be1f-8a8d7b80f2fe",
+    "vendorSku": "BLGO-OFF-0001",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 38.5,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 7,
+    "contracted": false,
+    "availabilityStatus": "in_stock",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "beb5c9b0-2a93-4485-80be-becdb60d010e",
+    "vendorId": "d39c51a0-7834-4758-9e11-234f033c47c8",
+    "productId": "63365a14-ab2b-4dc3-9d38-5bd98757fcf6",
+    "vendorSku": "BR-IT-0002",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 41.0,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 8,
+    "contracted": true,
+    "availabilityStatus": "limited",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "7c6fa57f-1ce2-47c6-9281-5a355f76a5e0",
+    "vendorId": "264ed721-79e9-42d8-b663-c46262795d2d",
+    "productId": "63365a14-ab2b-4dc3-9d38-5bd98757fcf6",
+    "vendorSku": "RISU-IT-0001",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 40.5,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 8,
+    "contracted": false,
+    "availabilityStatus": "limited",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "9b334941-f0d9-4502-a8dd-05f6201e51d9",
+    "vendorId": "8065175f-c9f3-4e2e-b2c1-1091178538fb",
+    "productId": "b98cc891-9088-47c1-ab77-eff4821572c9",
+    "vendorSku": "AT-IT-0002",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 43.0,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 9,
+    "contracted": false,
+    "availabilityStatus": "in_stock",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "42c01173-2051-4f81-aeb0-a95acd566a11",
+    "vendorId": "0133a82a-603c-4684-995d-519edd7aa314",
+    "productId": "b98cc891-9088-47c1-ab77-eff4821572c9",
+    "vendorSku": "SIWH-IT-0001",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 42.5,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 9,
+    "contracted": false,
+    "availabilityStatus": "in_stock",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "ed29c785-672d-42f4-8393-e368a046cd2e",
+    "vendorId": "fab8f4ca-40d2-4e8a-9aac-978e92a94ee9",
+    "productId": "6be82840-b54c-43b2-9efb-701647ae81b9",
+    "vendorSku": "BLGO-IT-0002",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 45.0,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 3,
+    "contracted": false,
+    "availabilityStatus": "in_stock",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "7fffd001-d9e1-452f-92cb-7fe8986ff560",
+    "vendorId": "71c56364-f0de-423a-8557-2e4d2c51277d",
+    "productId": "6be82840-b54c-43b2-9efb-701647ae81b9",
+    "vendorSku": "CETR-IT-0001",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 44.5,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 3,
+    "contracted": false,
+    "availabilityStatus": "in_stock",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "60e3e454-8775-4be3-8af3-d488ab0ddf34",
+    "vendorId": "264ed721-79e9-42d8-b663-c46262795d2d",
+    "productId": "ff5f4399-5455-4451-a70d-f82c5bcedab5",
+    "vendorSku": "RISU-IT-0002",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 47.0,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 4,
+    "contracted": false,
+    "availabilityStatus": "in_stock",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "24d63521-cb5b-48b6-a926-e070d1a77985",
+    "vendorId": "8ba9dcc8-6a12-4c68-8811-b60840d72abd",
+    "productId": "ff5f4399-5455-4451-a70d-f82c5bcedab5",
+    "vendorSku": "SU-IT-0002",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 47.0,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 4,
+    "contracted": true,
+    "availabilityStatus": "in_stock",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "0e7b523b-aecc-4d93-831a-e7eb4f7db513",
+    "vendorId": "0133a82a-603c-4684-995d-519edd7aa314",
+    "productId": "275ef4f2-1aee-4e94-8737-13838ba98005",
+    "vendorSku": "SIWH-FAC-0002",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 49.0,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 5,
+    "contracted": false,
+    "availabilityStatus": "in_stock",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "3c2a9ba2-56f4-4c15-b327-342ff03d372b",
+    "vendorId": "e8f6f7bf-8197-4cf2-a389-2580b6994eaa",
+    "productId": "275ef4f2-1aee-4e94-8737-13838ba98005",
+    "vendorSku": "PR-FAC-0002",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 49.0,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 5,
+    "contracted": true,
+    "availabilityStatus": "in_stock",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "7db8f9b5-7c28-4186-b3fc-7814b4b0b94f",
+    "vendorId": "71c56364-f0de-423a-8557-2e4d2c51277d",
+    "productId": "ec9a81a9-ffe1-45df-9a87-fab0be8420b5",
+    "vendorSku": "CETR-FAC-0002",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 51.0,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 6,
+    "contracted": false,
+    "availabilityStatus": "limited",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "dbe81515-c4c2-420a-8f39-e65a1b6e977f",
+    "vendorId": "de1f11a1-a2e9-4da1-85db-8d04e8baebb0",
+    "productId": "ec9a81a9-ffe1-45df-9a87-fab0be8420b5",
+    "vendorSku": "CI-FAC-0002",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 51.0,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 6,
+    "contracted": true,
+    "availabilityStatus": "limited",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "f789f505-9d0c-4f5e-8a12-170caa7ad896",
+    "vendorId": "8ba9dcc8-6a12-4c68-8811-b60840d72abd",
+    "productId": "cbbc9699-eebc-4bb1-bb2d-8d2934fec2e7",
+    "vendorSku": "SU-FAC-0003",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 53.5,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 7,
+    "contracted": true,
+    "availabilityStatus": "in_stock",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "16c67535-bb5a-457f-aa51-f17bbb195df8",
+    "vendorId": "5fbebce3-8715-4150-8f14-3def51d54208",
+    "productId": "cbbc9699-eebc-4bb1-bb2d-8d2934fec2e7",
+    "vendorSku": "PI-FAC-0003",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 53.5,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 7,
+    "contracted": true,
+    "availabilityStatus": "in_stock",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "57dfa889-8215-4487-bdef-01c20ba389bc",
+    "vendorId": "e8f6f7bf-8197-4cf2-a389-2580b6994eaa",
+    "productId": "96543684-ff12-4bff-89d7-1a23e449b769",
+    "vendorSku": "PR-FAC-0003",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 55.5,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 8,
+    "contracted": true,
+    "availabilityStatus": "in_stock",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "edf928df-34ff-48de-85fd-8d1622c801e6",
+    "vendorId": "d39c51a0-7834-4758-9e11-234f033c47c8",
+    "productId": "96543684-ff12-4bff-89d7-1a23e449b769",
+    "vendorSku": "BR-FAC-0003",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 55.5,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 8,
+    "contracted": true,
+    "availabilityStatus": "in_stock",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "99c73076-a4ca-42ae-9502-6e66fec16e51",
+    "vendorId": "de1f11a1-a2e9-4da1-85db-8d04e8baebb0",
+    "productId": "37841ef2-295e-4e2a-a30e-7dc9860001d1",
+    "vendorSku": "CI-SAF-0003",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 57.5,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 9,
+    "contracted": true,
+    "availabilityStatus": "in_stock",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "07890ba8-7f0d-40b4-bb78-454472fa6cc3",
+    "vendorId": "8065175f-c9f3-4e2e-b2c1-1091178538fb",
+    "productId": "37841ef2-295e-4e2a-a30e-7dc9860001d1",
+    "vendorSku": "AT-SAF-0003",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 57.5,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 9,
+    "contracted": false,
+    "availabilityStatus": "in_stock",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "5d8ab19e-a701-4e84-947a-ae801093c1f7",
+    "vendorId": "5fbebce3-8715-4150-8f14-3def51d54208",
+    "productId": "c3525642-9521-477d-ad70-6d1da44a1ea6",
+    "vendorSku": "PI-SAF-0004",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 60.0,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 3,
+    "contracted": true,
+    "availabilityStatus": "in_stock",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "a5c62107-6673-478e-8cc9-1364c1dad99b",
+    "vendorId": "fab8f4ca-40d2-4e8a-9aac-978e92a94ee9",
+    "productId": "c3525642-9521-477d-ad70-6d1da44a1ea6",
+    "vendorSku": "BLGO-SAF-0003",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 59.5,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 3,
+    "contracted": false,
+    "availabilityStatus": "in_stock",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "0c931fba-0a73-4aad-a5c1-ef17aab98cd4",
+    "vendorId": "d39c51a0-7834-4758-9e11-234f033c47c8",
+    "productId": "5baecc94-f1cc-42ed-a3b7-20da41926f0f",
+    "vendorSku": "BR-SAF-0004",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 62.0,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 4,
+    "contracted": true,
+    "availabilityStatus": "limited",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "bdb516b0-b122-40c9-ad76-95beb4430411",
+    "vendorId": "264ed721-79e9-42d8-b663-c46262795d2d",
+    "productId": "5baecc94-f1cc-42ed-a3b7-20da41926f0f",
+    "vendorSku": "RISU-SAF-0003",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 61.5,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 4,
+    "contracted": false,
+    "availabilityStatus": "limited",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "185d2e4e-c23d-4418-adf3-9fed02e8d920",
+    "vendorId": "8065175f-c9f3-4e2e-b2c1-1091178538fb",
+    "productId": "53fb5e30-a7a4-4249-8cb7-07d4d6e7be60",
+    "vendorSku": "AT-SAF-0004",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 64.0,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 5,
+    "contracted": false,
+    "availabilityStatus": "in_stock",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "d386a35b-5d9a-4166-9293-28763d792d31",
+    "vendorId": "0133a82a-603c-4684-995d-519edd7aa314",
+    "productId": "53fb5e30-a7a4-4249-8cb7-07d4d6e7be60",
+    "vendorSku": "SIWH-SAF-0003",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 63.5,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 5,
+    "contracted": false,
+    "availabilityStatus": "in_stock",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "de9bce60-e935-49f7-b1ec-c3c69f5324df",
+    "vendorId": "fab8f4ca-40d2-4e8a-9aac-978e92a94ee9",
+    "productId": "44e52969-f33b-4e99-99d8-fe33a83a0d5a",
+    "vendorSku": "BLGO-PRO-0004",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 66.0,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 6,
+    "contracted": false,
+    "availabilityStatus": "in_stock",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "8b191142-b426-4a83-bb26-c01a7f0962e0",
+    "vendorId": "71c56364-f0de-423a-8557-2e4d2c51277d",
+    "productId": "44e52969-f33b-4e99-99d8-fe33a83a0d5a",
+    "vendorSku": "CETR-PRO-0003",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 65.5,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 6,
+    "contracted": false,
+    "availabilityStatus": "in_stock",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "d2c694d0-deb3-416a-af28-89c2efa7dc21",
+    "vendorId": "264ed721-79e9-42d8-b663-c46262795d2d",
+    "productId": "2637efcc-e4d1-4c0e-ba39-8cb00a0657f7",
+    "vendorSku": "RISU-PRO-0004",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 68.0,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 7,
+    "contracted": false,
+    "availabilityStatus": "in_stock",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "fd1b6703-2853-46cf-a6fc-129bd16275e4",
+    "vendorId": "8ba9dcc8-6a12-4c68-8811-b60840d72abd",
+    "productId": "2637efcc-e4d1-4c0e-ba39-8cb00a0657f7",
+    "vendorSku": "SU-PRO-0004",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 68.0,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 7,
+    "contracted": true,
+    "availabilityStatus": "in_stock",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "55632da0-4a30-4e59-8b83-ce57b641b75e",
+    "vendorId": "0133a82a-603c-4684-995d-519edd7aa314",
+    "productId": "9f7c8c75-00a3-44be-836f-93d78c187c43",
+    "vendorSku": "SIWH-PRO-0004",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 70.0,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 8,
+    "contracted": false,
+    "availabilityStatus": "in_stock",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "63dfff05-2651-448e-9252-78694d74bddf",
+    "vendorId": "e8f6f7bf-8197-4cf2-a389-2580b6994eaa",
+    "productId": "9f7c8c75-00a3-44be-836f-93d78c187c43",
+    "vendorSku": "PR-PRO-0004",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 70.0,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 8,
+    "contracted": true,
+    "availabilityStatus": "in_stock",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "6a86873f-370f-4bcb-992e-d131e3847304",
+    "vendorId": "71c56364-f0de-423a-8557-2e4d2c51277d",
+    "productId": "bd89587a-b501-48bc-a804-44a2c55b5a8b",
+    "vendorSku": "CETR-PRO-0004",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 72.0,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 9,
+    "contracted": false,
+    "availabilityStatus": "limited",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "7b136dd9-719d-4a13-abd9-8a62e653fe02",
+    "vendorId": "de1f11a1-a2e9-4da1-85db-8d04e8baebb0",
+    "productId": "bd89587a-b501-48bc-a804-44a2c55b5a8b",
+    "vendorSku": "CI-PRO-0004",
+    "unit": "piece",
+    "pricing": {
+      "currency": "USD",
+      "unitPrice": 72.0,
+      "minimumOrderQty": 1
+    },
+    "leadTimeDays": 9,
+    "contracted": true,
+    "availabilityStatus": "limited",
+    "active": true,
+    "metadata": {
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  }
+]

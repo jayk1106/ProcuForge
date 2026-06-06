@@ -1,0 +1,8 @@
+{
+  "remote_agent_engine_id": "projects/192679313906/locations/us-central1/reasoningEngines/9115807364065263616",
+  "deployment_timestamp": "2026-05-30T14:15:22.018621",
+  "agent_name": "procu-forge-buyer",
+  "project": "ratelx-ai",
+  "location": "us-central1",
+  "artifacts_bucket": "ratelx-ai-procu-forge-buyer-logs-data"
+}

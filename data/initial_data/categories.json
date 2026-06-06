@@ -1,0 +1,52 @@
+[
+  {
+    "id": "66cd4b1d-5c9b-4784-a2b3-e8f3bd1e40d0",
+    "name": "Office Supplies",
+    "description": "Everyday office consumables and stationery",
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "785a9afb-b367-4668-82d1-d9c932112d0c",
+    "name": "IT Hardware",
+    "description": "Computers, peripherals, and networking devices",
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "693a25b2-6b62-4b4d-9cc1-1e0d70479521",
+    "name": "Facilities",
+    "description": "Cleaning, maintenance, and facility operations",
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "7053df7d-a396-421a-97bb-8de357b23070",
+    "name": "Safety",
+    "description": "Workplace safety equipment and PPE",
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  },
+  {
+    "id": "1d4e6930-6704-4d10-9b1f-a1b593162b5a",
+    "name": "Professional Services",
+    "description": "Consulting and specialist services",
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  }
+]

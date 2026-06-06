@@ -1,0 +1,14 @@
+[
+  {
+    "id": "eb1a2fb8-898a-4350-9eb1-2f8d9f7c4f91",
+    "organizationId": "1a15ffe3-e95c-49cf-b544-bc7df751922a",
+    "name": "jay",
+    "email": "jay@example.com",
+    "role": "procurement_manager",
+    "active": true,
+    "metadata": {
+      "createdAt": "2026-05-06T00:00:00Z",
+      "updatedAt": "2026-05-06T00:00:00Z"
+    }
+  }
+]
