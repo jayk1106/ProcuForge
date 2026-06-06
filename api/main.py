@@ -33,6 +33,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_api_settings()
     if settings.environment != "development":
         missing: list[str] = []
+        if not settings.vertex_project_id:
+            missing.append("GOOGLE_CLOUD_PROJECT")
+        if not settings.reasoning_engine_app_name:
+            missing.append("BUYER_REASONING_ENGINE")
+        if not settings.vendor_reasoning_engine_app_name:
+            missing.append("VENDOR_REASONING_ENGINE")
         if not settings.workflow_default_user_id:
             missing.append("WORKFLOW_DEFAULT_USER_ID")
         if not settings.workflow_default_organization_id:

@@ -1,6 +1,7 @@
 'use client'
 import React, { useState } from 'react'
 import { usePathname } from 'next/navigation'
+import { AuthGate } from '@/components/auth/AuthGate'
 import { TopNav } from './TopNav'
 import { Footer } from './Footer'
 import { ChatPanel } from './ChatPanel'
@@ -27,16 +28,18 @@ export function ClientShell({ children }: ClientShellProps) {
   }
 
   return (
-    <ChatContext.Provider value={{ openChat: () => setChatOpen(true) }}>
-      <PRModalContext.Provider value={{ openPRModal: () => setPrModalOpen(true) }}>
-        <div className="app-shell">
-          <TopNav onNewRequest={() => setPrModalOpen(true)} />
-          <main style={{ flex: 1 }}>{children}</main>
-          <Footer />
-          <ChatPanel open={chatOpen} onClose={() => setChatOpen(false)} />
-          <PRModal open={prModalOpen} onClose={() => setPrModalOpen(false)} />
-        </div>
-      </PRModalContext.Provider>
-    </ChatContext.Provider>
+    <AuthGate>
+      <ChatContext.Provider value={{ openChat: () => setChatOpen(true) }}>
+        <PRModalContext.Provider value={{ openPRModal: () => setPrModalOpen(true) }}>
+          <div className="app-shell">
+            <TopNav onNewRequest={() => setPrModalOpen(true)} />
+            <main style={{ flex: 1 }}>{children}</main>
+            <Footer />
+            <ChatPanel open={chatOpen} onClose={() => setChatOpen(false)} />
+            <PRModal open={prModalOpen} onClose={() => setPrModalOpen(false)} />
+          </div>
+        </PRModalContext.Provider>
+      </ChatContext.Provider>
+    </AuthGate>
   )
 }

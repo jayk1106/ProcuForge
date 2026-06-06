@@ -1,5 +1,7 @@
 # Agent Engine Deployment
 
+> **HTTP API runtime (Cloud Run + Vercel):** see [cloud_run_deployment.md](./cloud_run_deployment.md) and [production_setup_guide.md](./production_setup_guide.md).
+
 This document covers deploying the two ProcuForge agents to **Vertex AI Agent Engine** (reasoning engines) and the configuration each deployment requires.
 
 - **Buyer** — `procu_forge_buyer.agent.root_agent` (procurement orchestrator loop)

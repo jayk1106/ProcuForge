@@ -9,5 +9,7 @@ wheels/
 # Virtual environments
 .venv
 .env
+.env.production
+.env.production.local
 .next
 *.db

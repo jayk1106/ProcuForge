@@ -2,6 +2,8 @@
 
 Single-user admin authentication for the ProcuForge admin panel.
 
+For production deployment (Vercel + Cloud Run, CORS, secrets), see [production_setup_guide.md](./production_setup_guide.md).
+
 ## What it protects
 
 - **All HTTP endpoints under `/api/v1/*`** — `products`, `workflow`, `vendor-threads`, `test`, plus `auth/me` and `auth/ws-ticket`.
@@ -16,7 +18,7 @@ Left intentionally public:
 
 ```
 ┌──────────── Next.js (app.example.com) ────────────┐
-│ middleware.ts: cookie present? else → /login      │
+│ AuthGate: GET /auth/me → redirect if unauthenticated │
 │ /login → POST /api/v1/auth/login                  │
 │ api-client: credentials: 'include' (always)       │
 │ useWorkflowSocket: POST /auth/ws-ticket → WS?ticket=
@@ -33,6 +35,8 @@ Left intentionally public:
 └───────────────────────────────────────────────────┘
 ```
 
+In production the frontend (Vercel) and API (Cloud Run) are on **different domains**. The session cookie is stored for the API domain. `AuthGate` verifies auth via `GET /auth/me` instead of checking cookie presence on the Vercel domain. See [production_setup_guide.md#authentication-in-production](./production_setup_guide.md#authentication-in-production).
+
 Two JWT flavours are issued, both signed with `JWT_SECRET` (HS256):
 
 | Token         | TTL                 | Carries                          | Used for                                       |
@@ -42,7 +46,7 @@ Two JWT flavours are issued, both signed with `JWT_SECRET` (HS256):
 
 The session cookie is `HttpOnly; Secure; SameSite=None; Path=/` so it survives cross-origin requests in both development (browsers grant `Secure` an exemption on `localhost`) and production.
 
-The Next.js middleware does only a **presence check** on the cookie — real verification happens in FastAPI on every request. A forged cookie that sneaks past the middleware fails the very next API/WS call and the user is bounced back to `/login`.
+`AuthGate` calls `GET /auth/me` to gate protected routes — real JWT verification happens in FastAPI on every request. A forged or expired session fails the next API/WS call and the user is redirected to `/login`.
 
 ## Setup
 
@@ -220,7 +224,7 @@ api/
 └── services/auth_service.py        # bcrypt verify + JWT encode/decode
 
 web/src/
-├── middleware.ts                   # cookie-presence gate
+├── components/auth/AuthGate.tsx      # client-side auth gate (production cross-origin)
 ├── app/login/page.tsx              # login form
 ├── components/layout/{ClientShell,TopNav}.tsx  # chrome skip on /login, logout button
 ├── hooks/{useAuth,useWorkflowSocket}.ts        # user state + ws ticket flow

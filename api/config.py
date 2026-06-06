@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 from functools import lru_cache
+from typing import Annotated
 
 from pydantic import AliasChoices, Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class APISettings(BaseSettings):
@@ -35,7 +37,7 @@ class APISettings(BaseSettings):
         validation_alias="API_DEBUG",
     )
 
-    cors_origins: list[str] = Field(
+    cors_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["http://localhost:3000"],
         validation_alias="API_CORS_ORIGINS",
         description=(
@@ -180,7 +182,7 @@ class APISettings(BaseSettings):
             if not stripped:
                 return ["http://localhost:3000"]
             if stripped.startswith("["):
-                return stripped
+                return json.loads(stripped)
             return [item.strip() for item in stripped.split(",") if item.strip()]
         return value
 
