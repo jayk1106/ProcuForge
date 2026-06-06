@@ -2,13 +2,22 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 
-from api.dependencies import VendorThreadQueryServiceDep, WorkflowQueryServiceDep, WorkflowServiceDep
+from api.dependencies import (
+    VendorThreadQueryServiceDep,
+    WorkflowQueryServiceDep,
+    WorkflowServiceDep,
+    get_current_admin,
+)
 from api.schemas.ui_dto import VendorConvoDTO, VendorThreadRowDTO, WorkflowDetailDTO, WorkflowRowDTO
 from api.schemas.workflow import WorkflowApproveResponse, WorkflowStartRequest, WorkflowStartResponse
 
-router = APIRouter(prefix="/workflow", tags=["workflow"])
+router = APIRouter(
+    prefix="/workflow",
+    tags=["workflow"],
+    dependencies=[Depends(get_current_admin)],
+)
 
 
 @router.get(

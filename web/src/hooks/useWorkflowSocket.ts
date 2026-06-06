@@ -3,8 +3,13 @@
 import { useEffect, useRef } from 'react'
 import { buildWsUrl } from '@/lib/wsUrl'
 import { wsLog } from '@/lib/log'
+import { getWsTicket, UnauthorizedError } from '@/lib/api-client'
 
 const RECONNECT_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 15_000, 30_000]
+
+// Mirrors api/routers/ws.py: close codes used to signal auth failure.
+const WS_CLOSE_UNAUTHORIZED = 4401
+const WS_CLOSE_FORBIDDEN = 4403
 
 interface ServerEnvelope<T> {
   event_type: string
@@ -65,17 +70,37 @@ export function useWorkflowSocket<T>(
       openDeferTimer = setTimeout(() => {
         openDeferTimer = null
         if (cancelled) return
-        const url = buildWsUrl(path)
-        wsLog(debugLabel, `connecting attempt=${reconnectAttempt}`, { url })
-        try {
-          ws = new WebSocket(url)
-        } catch (err) {
-          wsLog(debugLabel, 'construct-failed', err)
-          scheduleReconnect()
+        void openSocket()
+      }, 0)
+    }
+
+    const openSocket = async () => {
+      let ticket: string
+      try {
+        const res = await getWsTicket()
+        ticket = res.ticket
+      } catch (err) {
+        if (err instanceof UnauthorizedError) {
+          // api-client already kicked us to /login; stop reconnect loop.
           return
         }
-        bindHandlers(ws)
-      }, 0)
+        wsLog(debugLabel, 'ticket-fetch-failed', err)
+        scheduleReconnect()
+        return
+      }
+      if (cancelled) return
+      const base = buildWsUrl(path)
+      const sep = base.includes('?') ? '&' : '?'
+      const url = `${base}${sep}ticket=${encodeURIComponent(ticket)}`
+      wsLog(debugLabel, `connecting attempt=${reconnectAttempt}`, { url: base })
+      try {
+        ws = new WebSocket(url)
+      } catch (err) {
+        wsLog(debugLabel, 'construct-failed', err)
+        scheduleReconnect()
+        return
+      }
+      bindHandlers(ws)
     }
 
     const bindHandlers = (sock: WebSocket) => {
@@ -146,7 +171,17 @@ export function useWorkflowSocket<T>(
           wasClean: ev.wasClean,
         })
         ws = null
-        if (!cancelled) scheduleReconnect()
+        if (cancelled) return
+        if (ev.code === WS_CLOSE_UNAUTHORIZED || ev.code === WS_CLOSE_FORBIDDEN) {
+          if (typeof window !== 'undefined') {
+            const next = encodeURIComponent(
+              window.location.pathname + window.location.search,
+            )
+            window.location.href = `/login?next=${next}`
+          }
+          return
+        }
+        scheduleReconnect()
       }
     }
 

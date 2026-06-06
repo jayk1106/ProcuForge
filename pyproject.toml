@@ -20,6 +20,8 @@ dependencies = [
     "google-cloud-trace>=1.13.0",
     "opentelemetry-sdk>=1.27.0",
     "opentelemetry-exporter-gcp-trace>=1.7.0",
+    "bcrypt>=4.1",
+    "PyJWT>=2.8",
 ]
 
 [tool.agents-cli]

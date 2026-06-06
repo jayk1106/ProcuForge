@@ -5,13 +5,18 @@ import logging
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
+from api.dependencies import get_current_admin
 from api.schemas.common import EchoRequest, EchoResponse, PingResponse
 from procu_forge_buyer.a2a_client import call_vendor
 
-router = APIRouter(prefix="/test", tags=["test"])
+router = APIRouter(
+    prefix="/test",
+    tags=["test"],
+    dependencies=[Depends(get_current_admin)],
+)
 logger = logging.getLogger(__name__)
 
 

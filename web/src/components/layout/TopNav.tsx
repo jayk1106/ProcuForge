@@ -1,6 +1,7 @@
 'use client'
 import React from 'react'
 import { useRouter, usePathname } from 'next/navigation'
+import { useAuth } from '@/hooks/useAuth'
 
 interface TopNavProps {
   onNewRequest: () => void
@@ -15,6 +16,7 @@ const tabs = [
 export function TopNav({ onNewRequest }: TopNavProps) {
   const pathname = usePathname()
   const router = useRouter()
+  const { me, logout } = useAuth()
 
   function isActive(id: string) {
     if (id === 'flows') return pathname.startsWith('/flows')
@@ -49,12 +51,26 @@ export function TopNav({ onNewRequest }: TopNavProps) {
           <button className="btn accent" onClick={onNewRequest}>
             [ + new request ]
           </button>
-          <div className="nav-user">
+          <div
+            className="nav-user"
+            title={
+              me
+                ? `${me.user.name}${me.user.email ? ` <${me.user.email}>` : ''} · ${me.org.name}`
+                : 'loading…'
+            }
+          >
             <span className="dot" />
-            <span>m.okafor</span>
+            <span>{me?.user.name ?? '…'}</span>
             <span className="faint">·</span>
-            <span className="faint">acme manuf.</span>
+            <span className="faint">{me?.org.name ?? ''}</span>
           </div>
+          <button
+            className="btn ghost tiny"
+            onClick={() => { void logout() }}
+            title="sign out"
+          >
+            [ logout ]
+          </button>
         </div>
       </div>
     </nav>

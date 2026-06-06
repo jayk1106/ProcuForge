@@ -1,12 +1,16 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel
 
-from api.dependencies import VendorThreadQueryServiceDep
+from api.dependencies import VendorThreadQueryServiceDep, get_current_admin
 from api.schemas.ui_dto import VendorConvoDTO, VendorThreadRowDTO
 
-router = APIRouter(prefix="/vendor-threads", tags=["vendor-threads"])
+router = APIRouter(
+    prefix="/vendor-threads",
+    tags=["vendor-threads"],
+    dependencies=[Depends(get_current_admin)],
+)
 
 
 class ThreadActionRequest(BaseModel):

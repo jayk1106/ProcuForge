@@ -1,20 +1,60 @@
 import type { ProductOption } from '@/types/product'
 import type { WorkflowRow } from '@/types/workflow'
 import type { ActiveFlow, Vendor, VendorConvo } from '@/types'
+import type {
+  LoginPayload,
+  LoginResponse,
+  MeResponse,
+  WsTicketResponse,
+} from '@/types/auth'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
 
-async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+export class UnauthorizedError extends Error {
+  constructor(message = 'unauthenticated') {
+    super(message)
+    this.name = 'UnauthorizedError'
+  }
+}
+
+interface FetchOptions {
+  // When false, a 401 will not redirect to /login (used by the login page
+  // itself so it can render an inline error instead of looping).
+  redirectOn401?: boolean
+}
+
+async function apiFetch<T>(
+  path: string,
+  init?: RequestInit,
+  opts: FetchOptions = {},
+): Promise<T> {
+  const { redirectOn401 = true } = opts
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
       ...(init?.headers ?? {}),
     },
   })
+
+  if (res.status === 401) {
+    if (redirectOn401 && typeof window !== 'undefined') {
+      const next = encodeURIComponent(
+        window.location.pathname + window.location.search,
+      )
+      window.location.href = `/login?next=${next}`
+    }
+    throw new UnauthorizedError()
+  }
+
   if (!res.ok) {
     const body = await res.text().catch(() => '')
     throw new Error(`API error ${res.status}: ${body || res.statusText}`)
+  }
+
+  if (res.status === 204) {
+    return undefined as T
   }
   return res.json() as Promise<T>
 }
@@ -125,5 +165,36 @@ export async function walkAwayVendorThread(
       method: 'POST',
       body: JSON.stringify({ reason: reason ?? null }),
     }
+  )
+}
+
+export async function login(payload: LoginPayload): Promise<LoginResponse> {
+  return apiFetch<LoginResponse>(
+    '/api/v1/auth/login',
+    { method: 'POST', body: JSON.stringify(payload) },
+    { redirectOn401: false },
+  )
+}
+
+export async function logout(): Promise<void> {
+  return apiFetch<void>(
+    '/api/v1/auth/logout',
+    { method: 'POST' },
+    { redirectOn401: false },
+  )
+}
+
+export async function getMe(): Promise<MeResponse> {
+  return apiFetch<MeResponse>(
+    '/api/v1/auth/me',
+    undefined,
+    { redirectOn401: false },
+  )
+}
+
+export async function getWsTicket(): Promise<WsTicketResponse> {
+  return apiFetch<WsTicketResponse>(
+    '/api/v1/auth/ws-ticket',
+    { method: 'POST' },
   )
 }

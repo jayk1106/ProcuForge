@@ -8,8 +8,11 @@ import logging
 import time
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+import jwt
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
+from api.config import get_api_settings
+from api.services.auth_service import decode_ws_ticket
 from api.ws import manager
 from api.ws.manager import vendor_thread_channel
 
@@ -20,6 +23,25 @@ router = APIRouter(prefix="/ws", tags=["ws"])
 
 _PING_INTERVAL_SECONDS = 25.0
 _PONG_GRACE_SECONDS = 60.0
+
+# Application-defined close codes (RFC 6455 reserves 4000-4999 for app use).
+_WS_CLOSE_UNAUTHORIZED = 4401
+
+
+async def _authorize_ws(ws: WebSocket, ticket: str | None) -> bool:
+    if not ticket:
+        await ws.accept()
+        await ws.close(code=_WS_CLOSE_UNAUTHORIZED, reason="missing_ticket")
+        logger.warning("ws.auth.reject reason=missing_ticket")
+        return False
+    try:
+        decode_ws_ticket(ticket, get_api_settings())
+    except jwt.InvalidTokenError as exc:
+        await ws.accept()
+        await ws.close(code=_WS_CLOSE_UNAUTHORIZED, reason="invalid_ticket")
+        logger.warning("ws.auth.reject reason=invalid_ticket detail=%s", exc)
+        return False
+    return True
 
 
 async def _serve_channel(channel: str, ws: WebSocket) -> None:
@@ -86,12 +108,24 @@ async def _serve_channel(channel: str, ws: WebSocket) -> None:
 
 
 @router.websocket("/workflow/{workflow_id}")
-async def workflow_stream(ws: WebSocket, workflow_id: str) -> None:
+async def workflow_stream(
+    ws: WebSocket,
+    workflow_id: str,
+    ticket: str | None = Query(default=None),
+) -> None:
     """Subscribe to live events for a single workflow."""
+    if not await _authorize_ws(ws, ticket):
+        return
     await _serve_channel(workflow_id, ws)
 
 
 @router.websocket("/vendor-threads/{rfq_id}")
-async def vendor_thread_stream(ws: WebSocket, rfq_id: str) -> None:
+async def vendor_thread_stream(
+    ws: WebSocket,
+    rfq_id: str,
+    ticket: str | None = Query(default=None),
+) -> None:
     """Subscribe to live events scoped to a single vendor-thread (rfq_id)."""
+    if not await _authorize_ws(ws, ticket):
+        return
     await _serve_channel(vendor_thread_channel(rfq_id), ws)

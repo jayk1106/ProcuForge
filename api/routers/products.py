@@ -1,12 +1,16 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
-from api.dependencies import ProductRepositoryDep
+from api.dependencies import ProductRepositoryDep, get_current_admin
 from api.schemas.product import ProductOptionDTO
 from api.services.product_query import search_active_products
 
-router = APIRouter(prefix="/products", tags=["products"])
+router = APIRouter(
+    prefix="/products",
+    tags=["products"],
+    dependencies=[Depends(get_current_admin)],
+)
 
 _MAX_LIMIT = 50
 

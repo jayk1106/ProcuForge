@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -10,12 +11,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.config import APISettings, get_api_settings
 from api.logging_config import configure_app_logging
-from api.routers import health, products, test, vendor_threads, workflow, ws as ws_router
+from api.routers import auth, health, products, test, vendor_threads, workflow, ws as ws_router
 from api.ws import manager as ws_manager
 from api.ws.context import init_ws_context
 
 load_dotenv()
 configure_app_logging()
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -34,6 +37,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             missing.append("WORKFLOW_DEFAULT_USER_ID")
         if not settings.workflow_default_organization_id:
             missing.append("WORKFLOW_DEFAULT_ORGANIZATION_ID")
+        if not settings.admin_password_hash:
+            missing.append("ADMIN_PASSWORD_HASH")
+        if not settings.jwt_secret:
+            missing.append("JWT_SECRET")
         if missing:
             raise RuntimeError(
                 "Missing required env vars for non-development environments: "
@@ -60,15 +67,39 @@ def create_app(settings: APISettings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
 
+    # Browsers reject `Access-Control-Allow-Credentials: true` paired with
+    # `Access-Control-Allow-Origin: *`, so demand a concrete origin list when
+    # credentials are required (login cookie). Wildcard is only safe in dev.
+    cors_has_wildcard = "*" in settings.cors_origins
+    if cors_has_wildcard and settings.environment != "development":
+        raise RuntimeError(
+            "API_CORS_ORIGINS must list explicit origins (not '*') in "
+            "non-development environments because the auth cookie requires "
+            "allow_credentials=True."
+        )
+    if cors_has_wildcard:
+        logger.warning(
+            "cors.wildcard_disables_auth_cookie origins=%s — set API_CORS_ORIGINS "
+            "to your frontend origin (e.g. http://localhost:3000) so the session "
+            "cookie can flow.",
+            settings.cors_origins,
+        )
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_credentials=True,
+        allow_credentials=not cors_has_wildcard,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    logger.info(
+        "cors.configured origins=%s allow_credentials=%s",
+        settings.cors_origins,
+        not cors_has_wildcard,
+    )
 
     app.include_router(health.router)
+    app.include_router(auth.router, prefix=settings.api_v1_prefix)
     app.include_router(test.router, prefix=settings.api_v1_prefix)
     app.include_router(products.router, prefix=settings.api_v1_prefix)
     app.include_router(workflow.router, prefix=settings.api_v1_prefix)
