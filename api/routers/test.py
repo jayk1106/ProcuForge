@@ -2,15 +2,57 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, status
+from pydantic import BaseModel, Field
 
 from api.schemas.common import EchoRequest, EchoResponse, PingResponse
 from procu_forge_buyer.a2a_client import call_vendor
 
 router = APIRouter(prefix="/test", tags=["test"])
 logger = logging.getLogger(__name__)
+
+
+class WsBroadcastRequest(BaseModel):
+    channel: str = Field(description="Raw channel key. Workflow page: <workflow_id>. Vendor page: vt:<rfq_id>.")
+    reason: str = Field(default="test_script", description="Logged as the broadcast reason tag.")
+    payload: dict[str, Any] = Field(description="Object delivered verbatim as the `data` field of the state_changed envelope.")
+    workflow_id: str | None = None
+    vendor_thread_id: str | None = None
+
+
+@router.post(
+    "/ws-broadcast",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Debug: schedule a state_changed broadcast on the given channel.",
+)
+async def ws_broadcast(req: WsBroadcastRequest) -> dict:
+    """Push an arbitrary payload to subscribers of ``channel`` as a state_changed event.
+
+    Dev-only helper that bypasses the agent loop and exercises the WS layer
+    directly. Subject to the same debounce + hash dedupe as production
+    broadcasts, so identical payloads back-to-back will collapse — vary at
+    least one field per call (e.g. a nonce) to see every event.
+    """
+    from api.ws import broadcast_state
+
+    payload = req.payload
+    broadcast_state(
+        req.channel,
+        lambda: payload,
+        reason=req.reason,
+        workflow_id=req.workflow_id,
+        vendor_thread_id=req.vendor_thread_id,
+    )
+    return {
+        "scheduled": True,
+        "channel": req.channel,
+        "reason": req.reason,
+        "workflow_id": req.workflow_id,
+        "vendor_thread_id": req.vendor_thread_id,
+    }
 
 
 @router.get(
