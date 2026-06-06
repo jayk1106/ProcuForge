@@ -107,9 +107,10 @@ If `.env.production` does not exist, the script copies from `.env.production.exa
 ### 5. Deploy Vercel (one-time project setup)
 
 1. Import repo in Vercel, root directory **`web`**
-2. Set `NEXT_PUBLIC_API_URL` to your Cloud Run URL (after first API deploy, or update after)
-3. Note the Vercel URL and set `API_CORS_ORIGINS` in `.env.production`
-4. Redeploy API: `./scripts/deploy_cloud_run.sh`
+2. Framework preset **Next.js**; leave **Output Directory** blank (do not use `public` — that is for static sites, not Next.js builds)
+3. Set `NEXT_PUBLIC_API_URL` to your Cloud Run URL (after first API deploy, or update after)
+4. Note the Vercel URL and set `API_CORS_ORIGINS` in `.env.production`
+5. Redeploy API: `./scripts/deploy_cloud_run.sh`
 
 ---
 

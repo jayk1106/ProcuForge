@@ -142,10 +142,11 @@ gcloud run services describe procuforge-api --region=us-central1 --format='value
 ### Vercel
 
 1. Root directory **`web`**
-2. Set `NEXT_PUBLIC_API_URL` to the Cloud Run URL above
-3. Deploy and note the Vercel URL
-4. Set `API_CORS_ORIGINS` in `.env.production` to that exact URL
-5. Redeploy API: `./scripts/deploy_cloud_run.sh`
+2. Framework preset **Next.js**; leave **Output Directory** blank (if set to `public`, deploy fails with "No Output Directory named public found")
+3. Set `NEXT_PUBLIC_API_URL` to the Cloud Run URL above
+4. Deploy and note the Vercel URL
+5. Set `API_CORS_ORIGINS` in `.env.production` to that exact URL
+6. Redeploy API: `./scripts/deploy_cloud_run.sh`
 
 Multiple origins (preview + production), comma-separated, no spaces:
 
