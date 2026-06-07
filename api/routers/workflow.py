@@ -90,7 +90,7 @@ async def start_workflow(
     "/{workflow_id}/approve",
     response_model=WorkflowApproveResponse,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Approve a workflow at AWAITING_USER_APPROVAL and issue the PO",
+    summary="Approve a workflow parked at an HITL gate",
     responses={
         404: {"description": "Workflow not found."},
         422: {"description": "Workflow is not awaiting approval."},
@@ -102,8 +102,14 @@ async def approve_workflow(
     background_tasks: BackgroundTasks,
     service: WorkflowServiceDep,
 ) -> WorkflowApproveResponse:
-    """Advance the workflow from AWAITING_USER_APPROVAL to PO_ISSUED and
-    resume the buyer agent loop to send the Purchase Order.
+    """Resume a workflow parked at one of the human-in-the-loop gates.
+
+    The step being approved is inferred from the current ``pr_status``:
+    ``AWAITING_PO_APPROVAL``, ``AWAITING_GRN_APPROVAL``,
+    ``AWAITING_COMPLETION_APPROVAL``, or the legacy
+    ``AWAITING_USER_APPROVAL``. The endpoint flips ``pr_status`` back to the
+    matching active value and re-runs the buyer agent so ``purchase_manager``
+    can send the corresponding document.
     """
     response, job = await service.approve(workflow_id)
     background_tasks.add_task(service.run_agent, job)

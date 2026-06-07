@@ -54,6 +54,9 @@ Authoritative lifecycle: **docs/request_status.md**.
   ``purchase_manager_agent``.
 - **AWAITING_USER_APPROVAL** — **transfer_to_agent** ``purchase_manager_agent`` (legacy;
   advances to **PO_ISSUED** automatically).
+- **AWAITING_PO_APPROVAL**, **AWAITING_GRN_APPROVAL**, **AWAITING_COMPLETION_APPROVAL** —
+  Do not delegate; HITL gate. The loop stops via **pr_status** until the API
+  approve endpoint flips the status back to the active value.
 - **AWAITING_DELIVERY**, **GOODS_RECEIVED**, **AWAITING_INVOICE**,
   **INVOICE_CORRECTION_PENDING**, **INVOICE_VERIFIED**, **PO_REJECTED** — Do not delegate;
   human gate or external trigger required (**pr_status** stops the loop).

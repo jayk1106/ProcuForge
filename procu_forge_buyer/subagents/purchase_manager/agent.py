@@ -5,7 +5,11 @@ from google.adk.agents.readonly_context import ReadonlyContext
 
 from adk_vertex_model import vertex_flash_model
 
-from .callbacks import purchase_manager_after_agent, purchase_manager_before_agent
+from .callbacks import (
+    gate_for_approval,
+    purchase_manager_after_agent,
+    purchase_manager_before_agent,
+)
 from .tools import (
     build_purchase_progress,
     send_grn_created,
@@ -118,6 +122,6 @@ purchase_manager_agent = Agent(
         send_grn_created,
         send_process_complete,
     ],
-    before_agent_callback=purchase_manager_before_agent,
+    before_agent_callback=[gate_for_approval, purchase_manager_before_agent],
     after_agent_callback=purchase_manager_after_agent,
 )

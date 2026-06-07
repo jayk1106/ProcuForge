@@ -35,6 +35,7 @@ interface FormState {
   currency: string
   delivery: DeliveryState
   buyerNotes: string
+  approvalRequired: boolean
 }
 
 function defaultNeedBy(): string {
@@ -59,6 +60,7 @@ function initialForm(): FormState {
       pincode: '',
     },
     buyerNotes: '',
+    approvalRequired: false,
   }
 }
 
@@ -178,6 +180,7 @@ export function PRModal({ open, onClose }: PRModalProps) {
         currency: form.currency.trim().toUpperCase(),
         purpose: purpose || undefined,
         buyer_notes: notes ? [notes] : undefined,
+        approval_required: form.approvalRequired,
       })
       onClose()
       router.push(`/flows/${result.workflow_id}`)
@@ -400,6 +403,31 @@ export function PRModal({ open, onClose }: PRModalProps) {
                 <span className="br">]</span>
               </div>
             </div>
+
+            <AsciiRule />
+
+            <div className="field">
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  cursor: 'pointer',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={form.approvalRequired}
+                  onChange={(e) => set('approvalRequired', e.target.checked)}
+                />
+                <span>
+                  Require my approval before each step
+                  <span className="opt">
+                    &nbsp;&nbsp;(pauses for confirmation before PO, GRN, and completion)
+                  </span>
+                </span>
+              </label>
+            </div>
           </div>
         )}
 
@@ -438,6 +466,12 @@ export function PRModal({ open, onClose }: PRModalProps) {
                   <div className="v">{form.buyerNotes.trim()}</div>
                 </>
               )}
+              <div className="k">Approval gate</div>
+              <div className="v">
+                {form.approvalRequired
+                  ? 'pause for my approval at PO, GRN, and completion'
+                  : 'automated end-to-end'}
+              </div>
             </div>
           </div>
         )}

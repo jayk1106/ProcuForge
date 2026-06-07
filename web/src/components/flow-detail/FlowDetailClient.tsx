@@ -13,7 +13,7 @@ import { SidebarNav } from './SidebarNav'
 import { ActivityRail } from './ActivityRail'
 import { NegotiationBoard } from './NegotiationBoard'
 import { DiscoveredVendorsBoard } from './DiscoveredVendorsBoard'
-import { PoCard, GrnCard, InvoiceCard } from './DocumentCards'
+import { PoCard, GrnCard, InvoiceCard, ApprovalBanner } from './DocumentCards'
 import { ActionBanner } from './ActionBanner'
 import { StateDebugPanel } from '@/components/primitives/StateDebugPanel'
 import { useWorkflowSocket } from '@/hooks/useWorkflowSocket'
@@ -143,7 +143,23 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
   }
 
   const isEmpty = flow.vendors.length === 0 && flow.currentPhase === 'rfq'
-  const showAction = flow.needsAction
+  const pending = flow.pendingApproval ?? null
+  // The HITL gates render per-section CTAs, so suppress the global ActionBanner
+  // when one is active — otherwise the user sees two approve buttons.
+  const showAction = flow.needsAction && !pending
+
+  const approvalCta = (
+    step: 'po' | 'grn' | 'completion',
+    label: string,
+  ) =>
+    pending?.step === step
+      ? {
+          reason: pending.reason,
+          buttonLabel: label,
+          onApprove: handleApprove,
+          busy: approving,
+        }
+      : undefined
 
   const vendorCount = flow.vendors.length
   const discoveredCount = flow.discoveredVendors?.length ?? 0
@@ -335,12 +351,18 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
                 <Section
                   title="Purchase order"
                   num="4.0"
-                  pending={!flow.po}
-                  defaultOpen={!!flow.po && phaseStatus.po === 'in_progress'}
+                  pending={!flow.po && pending?.step !== 'po'}
+                  defaultOpen={
+                    pending?.step === 'po' ||
+                    (!!flow.po && phaseStatus.po === 'in_progress')
+                  }
                   status={<StatusPill kind={poPill.kind}>{poPill.text}</StatusPill>}
                 >
-                  {flow.po ? (
-                    <PoCard po={flow.po as Record<string, unknown>} />
+                  {flow.po || pending?.step === 'po' ? (
+                    <PoCard
+                      po={(flow.po as Record<string, unknown> | null) ?? null}
+                      approval={approvalCta('po', 'approve & send PO →')}
+                    />
                   ) : (
                     <PendingPlaceholder label="PO will be issued after approval." />
                   )}
@@ -351,12 +373,18 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
                 <Section
                   title="Goods receipt"
                   num="5.0"
-                  pending={!grn}
-                  defaultOpen={!!grn && phaseStatus.grn === 'in_progress'}
+                  pending={!grn && pending?.step !== 'grn'}
+                  defaultOpen={
+                    pending?.step === 'grn' ||
+                    (!!grn && phaseStatus.grn === 'in_progress')
+                  }
                   status={<StatusPill kind={grnPill.kind}>{grnPill.text}</StatusPill>}
                 >
-                  {grn ? (
-                    <GrnCard grn={grn as Record<string, unknown>} />
+                  {grn || pending?.step === 'grn' ? (
+                    <GrnCard
+                      grn={(grn as Record<string, unknown> | null) ?? null}
+                      approval={approvalCta('grn', 'approve & send GRN →')}
+                    />
                   ) : (
                     <PendingPlaceholder label="Awaiting goods receipt from vendor." />
                   )}
@@ -383,10 +411,22 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
                 <Section
                   title="Completion"
                   num="7.0"
-                  pending={phaseStatus.done !== 'done'}
-                  defaultOpen={phaseStatus.done === 'done'}
+                  pending={phaseStatus.done !== 'done' && pending?.step !== 'completion'}
+                  defaultOpen={
+                    phaseStatus.done === 'done' || pending?.step === 'completion'
+                  }
                   status={<StatusPill kind={donePill.kind}>{donePill.text}</StatusPill>}
                 >
+                  {pending?.step === 'completion' && (
+                    <ApprovalBanner
+                      approval={{
+                        reason: pending.reason,
+                        buttonLabel: 'approve & close procurement →',
+                        onApprove: handleApprove,
+                        busy: approving,
+                      }}
+                    />
+                  )}
                   {phaseStatus.done === 'done' ? (
                     <div className="kv">
                       <div className="k">PO</div>
@@ -410,7 +450,7 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
                         )}
                       </div>
                     </div>
-                  ) : (
+                  ) : pending?.step === 'completion' ? null : (
                     <PendingPlaceholder label="Workflow will close after payment is authorized." />
                   )}
                 </Section>

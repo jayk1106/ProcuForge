@@ -55,6 +55,20 @@ class BuyerWorkflowSessionState(BaseModel):
             "updated when vendor_search_agent runs load_vendor_offers_for_product."
         ),
     )
+    approval_required: bool = Field(
+        default=False,
+        description=(
+            "When True, purchase_manager pauses before each of PO, GRN, and "
+            "PROCESS_COMPLETE until POST /workflow/{id}/approve is called."
+        ),
+    )
+    approved_steps: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Steps the human has already signed off on. Values: 'po' | 'grn' | "
+            "'completion'. Appended by the approve endpoint."
+        ),
+    )
 
     def to_vertex_state(self) -> dict[str, object]:
         """Serialize for Vertex ADK session create/update (JSON-compatible)."""

@@ -79,7 +79,13 @@ class WorkflowService:
             requester_id=requester_id,
         )
 
-        await self._create_session(workflow_id, user_id, buyer_request, product)
+        await self._create_session(
+            workflow_id,
+            user_id,
+            buyer_request,
+            product,
+            approval_required=request.approval_required,
+        )
 
         qty_label = f"{product.name} × {request.quantity}"
         await self._write_index(
@@ -206,11 +212,15 @@ class WorkflowService:
     async def approve(
         self, workflow_id: str
     ) -> tuple[WorkflowApproveResponse, AgentJob]:
-        """Approve a workflow at AWAITING_USER_APPROVAL and advance to PO_ISSUED.
+        """Approve a parked workflow and advance pr_status to the resume value.
 
-        Reads the current session, verifies the status, injects a state-delta
-        event to advance pr_status to PO_ISSUED, then returns a job to re-run
-        the agent so the purchase_manager can issue the PO.
+        Infers which step is being approved from the current ``pr_status``:
+        ``AWAITING_PO_APPROVAL`` → step ``po``, resume ``VENDOR_SELECTED``;
+        ``AWAITING_GRN_APPROVAL`` → step ``grn``, resume ``PO_ACKNOWLEDGED``;
+        ``AWAITING_COMPLETION_APPROVAL`` → step ``completion``, resume
+        ``INVOICE_UNDER_VERIFICATION``. Records the step in
+        ``approved_steps`` so the gating callback will not re-park on this
+        step, clears ``pending_approval``, and queues an agent re-run.
         """
         from datetime import datetime, timezone
 
@@ -219,7 +229,24 @@ class WorkflowService:
         from google.adk.sessions import VertexAiSessionService
 
         from procu_forge_buyer.pr_status import PrStatus
-        from procu_forge_buyer.state_keys import PR_STATUS_KEY, PREVIOUS_PR_STATUS_KEY
+        from procu_forge_buyer.state_keys import (
+            APPROVED_STEPS_KEY,
+            PENDING_APPROVAL_KEY,
+            PR_STATUS_KEY,
+            PREVIOUS_PR_STATUS_KEY,
+        )
+
+        resume_table: dict[str, tuple[str, str]] = {
+            PrStatus.AWAITING_PO_APPROVAL.value: ("po", PrStatus.VENDOR_SELECTED.value),
+            PrStatus.AWAITING_GRN_APPROVAL.value: ("grn", PrStatus.PO_ACKNOWLEDGED.value),
+            PrStatus.AWAITING_COMPLETION_APPROVAL.value: (
+                "completion",
+                PrStatus.INVOICE_UNDER_VERIFICATION.value,
+            ),
+            # Legacy alias: pre-HITL sessions parked here go straight to PO_ISSUED
+            # (the old behavior).
+            PrStatus.AWAITING_USER_APPROVAL.value: ("po", PrStatus.PO_ISSUED.value),
+        }
 
         self._ensure_vertex_configured()
 
@@ -246,7 +273,8 @@ class WorkflowService:
             )
 
         current_status = session.state.get(PR_STATUS_KEY)
-        if current_status != PrStatus.AWAITING_USER_APPROVAL.value:
+        resume = resume_table.get(str(current_status) if current_status else "")
+        if resume is None:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=(
@@ -254,13 +282,25 @@ class WorkflowService:
                     f"Current status: {current_status!r}"
                 ),
             )
+        step, resume_status = resume
+
+        existing_approved = session.state.get(APPROVED_STEPS_KEY) or []
+        if not isinstance(existing_approved, list):
+            existing_approved = []
+        if step not in existing_approved:
+            next_approved = list(existing_approved) + [step]
+        else:
+            next_approved = list(existing_approved)
 
         state_event = Event(
+            invocation_id=f"approve-{uuid.uuid4().hex}",
             author="api:approve",
             actions=EventActions(
                 state_delta={
-                    PREVIOUS_PR_STATUS_KEY: PrStatus.AWAITING_USER_APPROVAL.value,
-                    PR_STATUS_KEY: PrStatus.PO_ISSUED.value,
+                    PREVIOUS_PR_STATUS_KEY: current_status,
+                    PR_STATUS_KEY: resume_status,
+                    APPROVED_STEPS_KEY: next_approved,
+                    PENDING_APPROVAL_KEY: None,
                 }
             ),
         )
@@ -281,14 +321,14 @@ class WorkflowService:
             await self._index_repo.update_fields(
                 workflow_id,
                 {
-                    "prStatus": PrStatus.PO_ISSUED.value,
+                    "prStatus": resume_status,
                     "needsAction": False,
                 },
             )
 
         logger.info(
-            "workflow.approve  workflow_id=%s status=%s->PO_ISSUED",
-            workflow_id, current_status,
+            "workflow.approve  workflow_id=%s step=%s status=%s->%s",
+            workflow_id, step, current_status, resume_status,
         )
 
         response = WorkflowApproveResponse(workflow_id=workflow_id, approved_at=approved_at)
@@ -297,7 +337,7 @@ class WorkflowService:
             user_id=user_id,
             prompt=(
                 f"Continue procurement workflow {workflow_id}. "
-                "The PO has been approved — proceed with purchase_manager_agent."
+                f"The {step} step has been approved — proceed with purchase_manager_agent."
             ),
         )
         return response, job
@@ -334,6 +374,8 @@ class WorkflowService:
         user_id: str,
         buyer_request: BuyerSessionRequestState,
         product: Product,
+        *,
+        approval_required: bool = False,
     ) -> None:
         from google.adk.sessions import VertexAiSessionService
 
@@ -344,6 +386,7 @@ class WorkflowService:
         session_state = BuyerWorkflowSessionState(
             request=buyer_request,
             product=product,
+            approval_required=approval_required,
         ).to_vertex_state()
         try:
             await session_service.create_session(

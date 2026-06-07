@@ -26,6 +26,16 @@ PO_VENDOR_ACK_KEY = "po_vendor_ack"
 INVOICE_VENDOR_ACK_KEY = "invoice_vendor_ack"
 PROCESS_COMPLETE_VENDOR_ACK_KEY = "process_complete_vendor_ack"
 
+# Human-in-the-loop approval policy (set at workflow start).
+# When True, purchase_manager pauses before each of PO / GRN / PROCESS_COMPLETE
+# until the matching step appears in APPROVED_STEPS_KEY.
+APPROVAL_REQUIRED_KEY = "approval_required"
+# Steps the human has signed off on. Values: "po" | "grn" | "completion".
+APPROVED_STEPS_KEY = "approved_steps"
+# Block describing the gate the workflow is currently parked at.
+# Shape: { "step": "po"|"grn"|"completion", "reason": str, "requested_at": iso8601 }
+PENDING_APPROVAL_KEY = "pending_approval"
+
 # Losing vendors notified with RFQ_CLOSED (vendor_id -> True); idempotent send guard
 RFQ_CLOSED_LOSERS_KEY = "rfq_closed_losers"
 

@@ -160,3 +160,8 @@ class WorkflowDetailDTO(BaseModel):
     grn: dict[str, Any] | None = None
     invoice: dict[str, Any] | None = None
     selected_vendor: dict[str, Any] | None = Field(default=None, alias="selectedVendor")
+    approval_required: bool = Field(default=False, alias="approvalRequired")
+    pending_approval: dict[str, Any] | None = Field(
+        default=None, alias="pendingApproval"
+    )
+    approved_steps: list[str] = Field(default_factory=list, alias="approvedSteps")

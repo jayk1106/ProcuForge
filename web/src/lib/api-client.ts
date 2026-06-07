@@ -93,6 +93,7 @@ export interface StartWorkflowPayload {
   requester_id?: string
   organization_id?: string
   buyer_notes?: string[]
+  approval_required?: boolean
 }
 
 export interface StartWorkflowResult {

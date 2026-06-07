@@ -37,9 +37,12 @@ from db.collections.product import Product
 from db.collections.vendor import Vendor
 from db.collections.workflow_event import WorkflowEventDoc
 from procu_forge_buyer.state_keys import (
+    APPROVAL_REQUIRED_KEY,
+    APPROVED_STEPS_KEY,
     GRN_KEY,
     INVOICE_KEY,
     NEGOTIATION_CONFIG_KEY,
+    PENDING_APPROVAL_KEY,
     PO_KEY,
     PR_STATUS_KEY,
     REQUEST_KEY,
@@ -362,6 +365,17 @@ def workflow_detail_from_state(
         grn=state.get(GRN_KEY) if isinstance(state.get(GRN_KEY), dict) else None,
         invoice=state.get(INVOICE_KEY) if isinstance(state.get(INVOICE_KEY), dict) else None,
         selectedVendor=selected if isinstance(selected, dict) else None,
+        approvalRequired=bool(state.get(APPROVAL_REQUIRED_KEY)),
+        pendingApproval=(
+            state.get(PENDING_APPROVAL_KEY)
+            if isinstance(state.get(PENDING_APPROVAL_KEY), dict)
+            else None
+        ),
+        approvedSteps=(
+            list(state.get(APPROVED_STEPS_KEY))
+            if isinstance(state.get(APPROVED_STEPS_KEY), list)
+            else []
+        ),
     )
 
 

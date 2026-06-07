@@ -45,6 +45,13 @@ HUMAN_GATED_PR_STATUSES: frozenset[PrStatus] = frozenset(
         PrStatus.INVOICE_CORRECTION_PENDING,
         PrStatus.INVOICE_VERIFIED,
         PrStatus.PO_REJECTED,
+        # Human-in-the-loop approval gates: the purchase_manager's before-callback
+        # parks the loop at these when ``approval_required`` is set in session
+        # state. ``POST /workflow/{id}/approve`` transitions back to the active
+        # status for the matching step.
+        PrStatus.AWAITING_PO_APPROVAL,
+        PrStatus.AWAITING_GRN_APPROVAL,
+        PrStatus.AWAITING_COMPLETION_APPROVAL,
     }
 )
 
@@ -232,6 +239,68 @@ def transition_to_escalated(state: MutableMapping[str, Any]) -> None:
     if current in TERMINAL_PR_STATUSES:
         return
     _set(state, current, PrStatus.ESCALATED)
+
+
+# ── HITL approval gates ───────────────────────────────────────────────────────
+#
+# Gate setters move pr_status FROM the active purchase-phase value TO an
+# AWAITING_*_APPROVAL value. They are called from purchase_manager's
+# before_agent_callback when ``approval_required`` is set and the matching
+# step has not yet been approved.
+#
+# Resume helpers do the reverse: they move pr_status FROM the gate value back
+# TO the active value so the existing ack-driven sync chain can run. They are
+# called from ``WorkflowService.approve`` after the human clicks the CTA.
+
+def transition_to_awaiting_po_approval(state: MutableMapping[str, Any]) -> None:
+    current = _parse_current(state.get(PR_STATUS_KEY))
+    if current == PrStatus.AWAITING_PO_APPROVAL:
+        return
+    if current != PrStatus.VENDOR_SELECTED:
+        return
+    _set(state, current, PrStatus.AWAITING_PO_APPROVAL)
+
+
+def transition_to_awaiting_grn_approval(state: MutableMapping[str, Any]) -> None:
+    current = _parse_current(state.get(PR_STATUS_KEY))
+    if current == PrStatus.AWAITING_GRN_APPROVAL:
+        return
+    if current != PrStatus.PO_ACKNOWLEDGED:
+        return
+    _set(state, current, PrStatus.AWAITING_GRN_APPROVAL)
+
+
+def transition_to_awaiting_completion_approval(state: MutableMapping[str, Any]) -> None:
+    current = _parse_current(state.get(PR_STATUS_KEY))
+    if current == PrStatus.AWAITING_COMPLETION_APPROVAL:
+        return
+    if current != PrStatus.INVOICE_UNDER_VERIFICATION:
+        return
+    _set(state, current, PrStatus.AWAITING_COMPLETION_APPROVAL)
+
+
+def transition_resume_for_po(state: MutableMapping[str, Any]) -> None:
+    """AWAITING_PO_APPROVAL -> VENDOR_SELECTED so the ack-sync chain can run send_po."""
+    current = _parse_current(state.get(PR_STATUS_KEY))
+    if current != PrStatus.AWAITING_PO_APPROVAL:
+        return
+    _set(state, current, PrStatus.VENDOR_SELECTED)
+
+
+def transition_resume_for_grn(state: MutableMapping[str, Any]) -> None:
+    """AWAITING_GRN_APPROVAL -> PO_ACKNOWLEDGED so the chain can run send_grn_created."""
+    current = _parse_current(state.get(PR_STATUS_KEY))
+    if current != PrStatus.AWAITING_GRN_APPROVAL:
+        return
+    _set(state, current, PrStatus.PO_ACKNOWLEDGED)
+
+
+def transition_resume_for_completion(state: MutableMapping[str, Any]) -> None:
+    """AWAITING_COMPLETION_APPROVAL -> INVOICE_UNDER_VERIFICATION so send_process_complete runs."""
+    current = _parse_current(state.get(PR_STATUS_KEY))
+    if current != PrStatus.AWAITING_COMPLETION_APPROVAL:
+        return
+    _set(state, current, PrStatus.INVOICE_UNDER_VERIFICATION)
 
 
 def _losing_vendor_ids(state: Mapping[str, Any]) -> list[str]:

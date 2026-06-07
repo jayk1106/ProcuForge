@@ -90,6 +90,17 @@ export interface ActiveFlow {
   grn?: Record<string, unknown> | null
   invoice?: Record<string, unknown> | null
   selectedVendor?: Record<string, unknown> | null
+  approvalRequired?: boolean
+  approvedSteps?: ApprovalStep[]
+  pendingApproval?: PendingApproval | null
+}
+
+export type ApprovalStep = 'po' | 'grn' | 'completion'
+
+export interface PendingApproval {
+  step: ApprovalStep
+  reason: string
+  requested_at?: string
 }
 
 export interface VendorConvoMessage {
