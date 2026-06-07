@@ -18,6 +18,12 @@ from procu_forge_buyer.state_keys import (
     SELECTED_VENDOR_KEY,
 )
 from procu_forge_buyer.subagents.purchase_manager.callbacks import gate_for_approval
+from procu_forge_buyer.subagents.purchase_manager.tools import (
+    COMPLETION_STEP,
+    GRN_STEP,
+    PO_STEP,
+    maybe_apply_approval_gate,
+)
 
 
 def _ctx(state: dict) -> MagicMock:
@@ -135,3 +141,48 @@ def test_gate_noop_when_all_steps_done():
 
     assert result is None
     assert PENDING_APPROVAL_KEY not in state
+
+
+# ── Tool-level gate (the mid-chain case the before_agent_callback can't catch) ──
+
+
+def test_tool_gate_returns_needs_approval_for_grn():
+    # After PO has been approved and acknowledged, the agent chains directly to
+    # send_grn_created in the same turn. The tool-level gate has to fire.
+    state = _state_at_grn_gate()
+    out = maybe_apply_approval_gate(state, step=GRN_STEP)
+
+    assert out is not None
+    assert out["ok"] is False
+    assert out["error"] == "needs_approval"
+    assert out["step"] == GRN_STEP
+    assert state[PR_STATUS_KEY] == PrStatus.AWAITING_GRN_APPROVAL.value
+
+
+def test_tool_gate_returns_needs_approval_for_completion():
+    state = _state_at_completion_gate()
+    out = maybe_apply_approval_gate(state, step=COMPLETION_STEP)
+
+    assert out is not None
+    assert out["ok"] is False
+    assert out["step"] == COMPLETION_STEP
+    assert state[PR_STATUS_KEY] == PrStatus.AWAITING_COMPLETION_APPROVAL.value
+
+
+def test_tool_gate_noop_when_step_already_approved():
+    state = _state_at_grn_gate()
+    state[APPROVED_STEPS_KEY] = ["po", "grn"]
+    out = maybe_apply_approval_gate(state, step=GRN_STEP)
+
+    assert out is None
+    assert state[PR_STATUS_KEY] == PrStatus.PO_ACKNOWLEDGED.value
+    assert PENDING_APPROVAL_KEY not in state
+
+
+def test_tool_gate_noop_when_approval_off():
+    state = _state_at_grn_gate()
+    state[APPROVAL_REQUIRED_KEY] = False
+    out = maybe_apply_approval_gate(state, step=GRN_STEP)
+
+    assert out is None
+    assert state[PR_STATUS_KEY] == PrStatus.PO_ACKNOWLEDGED.value

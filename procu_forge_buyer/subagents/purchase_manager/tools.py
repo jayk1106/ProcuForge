@@ -13,7 +13,7 @@ import asyncio
 import json
 import logging
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Protocol
 
 from google.adk.tools.base_tool import ToolContext
@@ -21,6 +21,11 @@ from google.adk.tools.base_tool import ToolContext
 from communication import A2AMessageBuilder
 from procu_forge_buyer.a2a_client import call_vendor
 from procu_forge_buyer.pr_status import PrStatus
+from procu_forge_buyer.pr_status_transitions import (
+    transition_to_awaiting_completion_approval,
+    transition_to_awaiting_grn_approval,
+    transition_to_awaiting_po_approval,
+)
 from procu_forge_buyer.purchase_a2a import (
     parse_vendor_envelope,
     validate_invoice_submitted,
@@ -29,10 +34,13 @@ from procu_forge_buyer.purchase_a2a import (
     vendor_error,
 )
 from procu_forge_buyer.state_keys import (
+    APPROVAL_REQUIRED_KEY,
+    APPROVED_STEPS_KEY,
     GRN_KEY,
     INVOICE_KEY,
     INVOICE_VENDOR_ACK_KEY,
     NEGOTIATION_CONFIG_KEY,
+    PENDING_APPROVAL_KEY,
     PO_KEY,
     PO_VENDOR_ACK_KEY,
     PR_STATUS_KEY,
@@ -42,6 +50,11 @@ from procu_forge_buyer.state_keys import (
     RFQ_CLOSED_LOSERS_KEY,
     SELECTED_VENDOR_KEY,
 )
+
+# Approval-step constants (mirrored in APPROVED_STEPS_KEY).
+PO_STEP = "po"
+GRN_STEP = "grn"
+COMPLETION_STEP = "completion"
 
 _LOG = logging.getLogger(__name__)
 
@@ -83,6 +96,95 @@ class _StateReader(Protocol):
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
+
+def _selected_vendor_label(state: _StateReader) -> str:
+    selected = state.get(SELECTED_VENDOR_KEY)
+    if isinstance(selected, dict):
+        return str(selected.get("vendor") or "the selected vendor")
+    return "the selected vendor"
+
+
+def _reason_for_step(step: str, state: _StateReader) -> str:
+    if step == PO_STEP:
+        vendor = _selected_vendor_label(state)
+        po = state.get(PO_KEY) if isinstance(state.get(PO_KEY), dict) else {}
+        amount = po.get("total_amount") if isinstance(po, dict) else None
+        if amount:
+            return f"Approval required before sending PO to {vendor} (total {amount})."
+        return f"Approval required before sending PO to {vendor}."
+    if step == GRN_STEP:
+        po = state.get(PO_KEY) if isinstance(state.get(PO_KEY), dict) else {}
+        po_number = po.get("po_number") if isinstance(po, dict) else None
+        if po_number:
+            return f"Approval required before sending GRN for PO {po_number}."
+        return "Approval required before sending GRN to the vendor."
+    if step == COMPLETION_STEP:
+        invoice = state.get(INVOICE_KEY) if isinstance(state.get(INVOICE_KEY), dict) else {}
+        invoice_number = invoice.get("invoice_number") if isinstance(invoice, dict) else None
+        if invoice_number:
+            return (
+                f"Approval required before closing the procurement for invoice {invoice_number}."
+            )
+        return "Approval required before closing the procurement."
+    return "Approval required before continuing."
+
+
+def _apply_gate_transition(state: Any, step: str) -> None:
+    if step == PO_STEP:
+        transition_to_awaiting_po_approval(state)
+    elif step == GRN_STEP:
+        transition_to_awaiting_grn_approval(state)
+    elif step == COMPLETION_STEP:
+        transition_to_awaiting_completion_approval(state)
+
+
+def resolve_next_purchase_step(state: _StateReader) -> str | None:
+    """Return the next purchase step that has not yet been vendor-confirmed."""
+    if not state.get(PO_VENDOR_ACK_KEY):
+        return PO_STEP
+    if not state.get(INVOICE_VENDOR_ACK_KEY):
+        return GRN_STEP
+    if not state.get(PROCESS_COMPLETE_VENDOR_ACK_KEY):
+        return COMPLETION_STEP
+    return None
+
+
+def maybe_apply_approval_gate(state: Any, *, step: str) -> dict[str, Any] | None:
+    """Park the workflow at ``AWAITING_<step>_APPROVAL`` if the policy demands it.
+
+    Returns a tool-style ``{ok: False, error: 'needs_approval', ...}`` dict when
+    the gate fires; the caller (a ``send_*`` tool or the before_agent_callback)
+    propagates that back to the agent, which stops the turn. The ``pr_router``
+    after-callback then sees the gated ``pr_status`` and escalates the loop.
+
+    No-op when ``approval_required`` is False or when ``step`` is already in
+    ``approved_steps``.
+    """
+    if not state.get(APPROVAL_REQUIRED_KEY):
+        return None
+    approved = state.get(APPROVED_STEPS_KEY) or []
+    if isinstance(approved, list) and step in approved:
+        return None
+
+    reason = _reason_for_step(step, state)
+    state[PENDING_APPROVAL_KEY] = {
+        "step": step,
+        "reason": reason,
+        "requested_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
+    _apply_gate_transition(state, step)
+    _LOG.info(
+        "purchase_manager.tool_gate step=%s pr_status=%s",
+        step,
+        state.get(PR_STATUS_KEY),
+    )
+    return {
+        "ok": False,
+        "error": "needs_approval",
+        "step": step,
+        "reason": reason,
+    }
+
 
 def _to_float(value: Any) -> float | None:
     try:
@@ -291,6 +393,10 @@ async def send_po(tool_context: ToolContext) -> dict[str, Any]:
     envelope (same ``po_number``) is rebuilt and re-sent. RFQ_CLOSED is
     idempotent per loser (tracked via ``rfq_closed_losers``).
     """
+    gated = maybe_apply_approval_gate(tool_context.state, step=PO_STEP)
+    if gated is not None:
+        return gated
+
     result = _get_vendor_config(tool_context.state)
     if isinstance(result, str):
         return {"ok": False, "error": result}
@@ -415,6 +521,10 @@ async def send_grn_created(tool_context: ToolContext) -> dict[str, Any]:
     A2A call so retries reuse the same identifier. Vendor matches GRN by
     ``po_number`` so the resend is idempotent.
     """
+    gated = maybe_apply_approval_gate(tool_context.state, step=GRN_STEP)
+    if gated is not None:
+        return gated
+
     result = _get_vendor_config(tool_context.state)
     if isinstance(result, str):
         return {"ok": False, "error": result}
@@ -517,6 +627,10 @@ async def send_process_complete(tool_context: ToolContext) -> dict[str, Any]:
     No new identifier is minted — references existing po/grn/invoice numbers —
     so this tool is naturally retry-safe.
     """
+    gated = maybe_apply_approval_gate(tool_context.state, step=COMPLETION_STEP)
+    if gated is not None:
+        return gated
+
     result = _get_vendor_config(tool_context.state)
     if isinstance(result, str):
         return {"ok": False, "error": result}
@@ -721,4 +835,9 @@ __all__ = [
     "_get_vendor_config",
     "_all_losing_vendors_notified",
     "_purchase_ack_snapshot",
+    "PO_STEP",
+    "GRN_STEP",
+    "COMPLETION_STEP",
+    "maybe_apply_approval_gate",
+    "resolve_next_purchase_step",
 ]

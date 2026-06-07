@@ -176,27 +176,37 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
     return { kind: 'go', text: `in progress · ${vendorCount} vendors` }
   })()
 
-  const poPill = pillForStatus(phaseStatus.po, {
-    done: 'fulfilled',
-    inProgress: 'issued',
-    pending: 'pending',
-    walked: 'rejected',
-  })
-  const grnPill = pillForStatus(phaseStatus.grn, {
-    done: 'received',
-    inProgress: 'in transit',
-    pending: 'pending',
-  })
+  const actionRequiredPill: PhasePillSpec = { kind: 'warn', text: 'action required' }
+  const poPill: PhasePillSpec =
+    pending?.step === 'po'
+      ? actionRequiredPill
+      : pillForStatus(phaseStatus.po, {
+          done: 'fulfilled',
+          inProgress: 'issued',
+          pending: 'pending',
+          walked: 'rejected',
+        })
+  const grnPill: PhasePillSpec =
+    pending?.step === 'grn'
+      ? actionRequiredPill
+      : pillForStatus(phaseStatus.grn, {
+          done: 'received',
+          inProgress: 'in transit',
+          pending: 'pending',
+        })
   const invPill = pillForStatus(phaseStatus.inv, {
     done: 'matched',
     inProgress: 'verifying',
     pending: 'pending',
   })
-  const donePill = pillForStatus(phaseStatus.done, {
-    done: 'complete',
-    inProgress: 'finalizing',
-    pending: 'pending',
-  })
+  const donePill: PhasePillSpec =
+    pending?.step === 'completion'
+      ? actionRequiredPill
+      : pillForStatus(phaseStatus.done, {
+          done: 'complete',
+          inProgress: 'finalizing',
+          pending: 'pending',
+        })
 
   const grn = flow.grn as Record<string, unknown> | null | undefined
   const invoice = flow.invoice as Record<string, unknown> | null | undefined
@@ -349,6 +359,7 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
 
               <div id="sec-po">
                 <Section
+                  key={pending?.step === 'po' ? 'po-gated' : 'po'}
                   title="Purchase order"
                   num="4.0"
                   pending={!flow.po && pending?.step !== 'po'}
@@ -371,6 +382,7 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
 
               <div id="sec-grn">
                 <Section
+                  key={pending?.step === 'grn' ? 'grn-gated' : 'grn'}
                   title="Goods receipt"
                   num="5.0"
                   pending={!grn && pending?.step !== 'grn'}
@@ -409,6 +421,7 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
 
               <div id="sec-done">
                 <Section
+                  key={pending?.step === 'completion' ? 'done-gated' : 'done'}
                   title="Completion"
                   num="7.0"
                   pending={phaseStatus.done !== 'done' && pending?.step !== 'completion'}
