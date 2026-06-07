@@ -101,9 +101,11 @@ async def resolve_org_profile(
         name=org.name,
         currency=settings.admin_org_currency,
         address=OrgAddress(
+            address=org.address.address,
             country=org.address.country,
             state=org.address.state,
             city=org.address.city,
+            pincode=org.address.pincode,
         ),
         active=org.active,
     )

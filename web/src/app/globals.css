@@ -946,13 +946,25 @@ a { color: inherit; text-decoration: none; }
   border-radius: 2px;
   width: 720px;
   max-width: 100%;
-  padding: 32px 40px;
+  max-height: calc(100vh - 120px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 .modal-head {
   display: flex; justify-content: space-between; align-items: flex-start;
-  padding-bottom: 18px;
+  padding: 32px 40px 18px;
   border-bottom: 1px solid var(--rule);
-  margin-bottom: 24px;
+}
+.modal-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 24px 40px;
+}
+.modal-foot {
+  border-top: 1px solid var(--rule);
+  padding: 16px 40px 24px;
+  background: var(--bg);
 }
 
 /* message timeline (vendor convo) */

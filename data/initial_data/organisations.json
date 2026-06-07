@@ -3,9 +3,11 @@
     "id": "1a15ffe3-e95c-49cf-b544-bc7df751922a",
     "name": "RatelX",
     "address": {
+      "address": "1455 Market Street, Suite 600",
       "country": "USA",
       "state": "California",
-      "city": "San Francisco"
+      "city": "San Francisco",
+      "pincode": "94103"
     },
     "active": true,
     "metadata": {
