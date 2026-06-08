@@ -2,6 +2,18 @@ import type { PhaseLabel } from '@/types/workflow'
 
 const PHASES: PhaseLabel[] = ['RFQ', 'NEG', 'PO', 'GRN', 'INV', 'DONE']
 
+// API still returns 'RFQ' for the first phase for backwards compatibility,
+// but the user-facing label is the vendor-discovery step (RFQs are sent
+// during NEG).
+const PHASE_DISPLAY_LABEL: Record<PhaseLabel, string> = {
+  RFQ: 'DISC',
+  NEG: 'NEG',
+  PO: 'PO',
+  GRN: 'GRN',
+  INV: 'INV',
+  DONE: 'DONE',
+}
+
 interface PhaseDotsProps {
   phase: PhaseLabel
 }
@@ -53,7 +65,7 @@ export function PhaseDots({ phase }: PhaseDotsProps) {
         className="text-[10px] font-bold tracking-widest"
         style={{ color: '#7A6E5C' }}
       >
-        {phase}
+        {PHASE_DISPLAY_LABEL[phase]}
       </span>
     </div>
   )

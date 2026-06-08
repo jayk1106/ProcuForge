@@ -10,6 +10,7 @@ from api.schemas.ui_dto import (
     ActivityItemDTO,
     DiscoveredVendorDTO,
     VendorConvoDTO,
+    VendorRelationSummaryDTO,
     VendorThreadMessageDTO,
     VendorThreadRowDTO,
     VendorThreadSummaryDTO,
@@ -63,6 +64,29 @@ def _get(d: dict[str, Any], *keys: str, default: Any = None) -> Any:
         if key in d and d[key] is not None:
             return d[key]
     return default
+
+
+def _relation_summary_dto(raw: Any) -> VendorRelationSummaryDTO | None:
+    if not isinstance(raw, dict):
+        return None
+    return VendorRelationSummaryDTO(
+        preferredVendor=bool(_get(raw, "preferredVendor", "preferred_vendor", default=False)),
+        relationshipStatus=str(
+            _get(raw, "relationshipStatus", "relationship_status", default="") or ""
+        ),
+        relationshipStrength=_coerce_float(
+            _get(raw, "relationshipStrength", "relationship_strength")
+        ),
+        averageDeliveryDelayDays=_coerce_float(
+            _get(raw, "averageDeliveryDelayDays", "average_delivery_delay_days")
+        ),
+        qualityScore=_coerce_float(_get(raw, "qualityScore", "quality_score")),
+        riskLevel=_get(raw, "riskLevel", "risk_level"),
+        usuallyOffersDiscount=_get(raw, "usuallyOffersDiscount", "usually_offers_discount"),
+        averageDiscountPercent=_coerce_float(
+            _get(raw, "averageDiscountPercent", "average_discount_percent")
+        ),
+    )
 
 
 def _parse_dt(raw: str | None) -> datetime | None:
@@ -322,6 +346,11 @@ def workflow_detail_from_state(
         unit_price = _coerce_float(_get(offer, "unitPrice", "unit_price"))
         lead_raw = _get(offer, "leadTimeDays", "lead_time_days")
         lead_days = int(lead_raw) if isinstance(lead_raw, (int, float)) else None
+        moq_raw = _get(offer, "minimumOrderQty", "minimum_order_qty")
+        moq = int(moq_raw) if isinstance(moq_raw, (int, float)) else 0
+        currency_matches = bool(
+            _get(offer, "currencyMatchesRequest", "currency_matches_request", default=True)
+        )
         discovered.append(
             DiscoveredVendorDTO(
                 offerId=str(_get(offer, "id", default=vid)),
@@ -336,6 +365,11 @@ def workflow_detail_from_state(
                 contracted=bool(offer.get("contracted")),
                 availabilityStatus=str(
                     _get(offer, "availabilityStatus", "availability_status", default="") or ""
+                ),
+                minimumOrderQty=moq,
+                currencyMatchesRequest=currency_matches,
+                vendorRelation=_relation_summary_dto(
+                    _get(offer, "vendorRelation", "vendor_relation")
                 ),
             )
         )

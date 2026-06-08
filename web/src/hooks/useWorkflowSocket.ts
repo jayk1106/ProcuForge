@@ -111,8 +111,10 @@ export function useWorkflowSocket<T>(
 
       sock.onmessage = (ev) => {
         let parsed: ServerEnvelope<T> | { type?: string } | null = null
+        console.log('ev.data', ev)
         try {
           parsed = JSON.parse(ev.data) as ServerEnvelope<T> | { type?: string }
+          console.log('parsed', parsed)
         } catch {
           wsLog(debugLabel, 'parse-failed', { bytes: (ev.data as string)?.length })
           return
@@ -189,7 +191,7 @@ export function useWorkflowSocket<T>(
       if (cancelled) return
       const delay =
         RECONNECT_DELAYS_MS[
-          Math.min(reconnectAttempt, RECONNECT_DELAYS_MS.length - 1)
+        Math.min(reconnectAttempt, RECONNECT_DELAYS_MS.length - 1)
         ]
       reconnectAttempt += 1
       wsLog(debugLabel, 'reconnect', { attempt: reconnectAttempt, delayMs: delay })

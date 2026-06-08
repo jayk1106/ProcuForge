@@ -114,6 +114,23 @@ class ActivityItemDTO(BaseModel):
     det: str
 
 
+class VendorRelationSummaryDTO(BaseModel):
+    """Buyer↔vendor relationship signals surfaced alongside each discovered offer."""
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+    preferred_vendor: bool = Field(default=False, alias="preferredVendor")
+    relationship_status: str = Field(default="", alias="relationshipStatus")
+    relationship_strength: float | None = Field(default=None, alias="relationshipStrength")
+    average_delivery_delay_days: float | None = Field(
+        default=None, alias="averageDeliveryDelayDays"
+    )
+    quality_score: float | None = Field(default=None, alias="qualityScore")
+    risk_level: str | None = Field(default=None, alias="riskLevel")
+    usually_offers_discount: bool | None = Field(default=None, alias="usuallyOffersDiscount")
+    average_discount_percent: float | None = Field(default=None, alias="averageDiscountPercent")
+
+
 class DiscoveredVendorDTO(BaseModel):
     """A catalog offer the buyer discovered before negotiation begins."""
 
@@ -130,6 +147,11 @@ class DiscoveredVendorDTO(BaseModel):
     lead_time_days: int | None = Field(default=None, alias="leadTimeDays")
     contracted: bool = False
     availability: str = Field(default="", alias="availabilityStatus")
+    minimum_order_qty: int = Field(default=0, alias="minimumOrderQty")
+    currency_matches_request: bool = Field(default=True, alias="currencyMatchesRequest")
+    vendor_relation: VendorRelationSummaryDTO | None = Field(
+        default=None, alias="vendorRelation"
+    )
 
 
 class WorkflowDetailDTO(BaseModel):

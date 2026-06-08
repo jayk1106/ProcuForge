@@ -1,7 +1,10 @@
 import type { Phase, Flow, ActiveFlow, VendorConvo, Vendor } from '@/types'
 
 export const PHASES: Phase[] = [
-  { id: 'rfq',  label: 'RFQ',  long: 'Request for Quote' },
+  // Phase id stays 'rfq' for backwards compatibility with the backend phase
+  // mapping; the user-facing label reflects what actually happens in this
+  // phase — vendor discovery. RFQs go out during NEG.
+  { id: 'rfq',  label: 'DISC', long: 'Vendor Discovery' },
   { id: 'neg',  label: 'NEG',  long: 'Negotiation' },
   { id: 'po',   label: 'PO',   long: 'Purchase Order' },
   { id: 'grn',  label: 'GRN',  long: 'Goods Receipt' },

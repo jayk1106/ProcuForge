@@ -52,6 +52,17 @@ export interface ActivityItem {
 
 export type PhaseStatus = 'pending' | 'in_progress' | 'done' | 'walked'
 
+export interface VendorRelationSummary {
+  preferredVendor: boolean
+  relationshipStatus: string
+  relationshipStrength: number | null
+  averageDeliveryDelayDays: number | null
+  qualityScore: number | null
+  riskLevel: string | null
+  usuallyOffersDiscount: boolean | null
+  averageDiscountPercent: number | null
+}
+
 export interface DiscoveredVendor {
   offerId: string
   vendorId: string
@@ -64,6 +75,9 @@ export interface DiscoveredVendor {
   leadTimeDays: number | null
   contracted: boolean
   availabilityStatus: string
+  minimumOrderQty?: number
+  currencyMatchesRequest?: boolean
+  vendorRelation?: VendorRelationSummary | null
 }
 
 export interface ActiveFlow {

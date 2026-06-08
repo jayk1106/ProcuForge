@@ -72,10 +72,29 @@ def _offers_detail_block(st: dict[str, Any]) -> str:
         lead = o.get("leadTimeDays", o.get("lead_time_days"))
         availability = o.get("availabilityStatus", o.get("availability_status"))
         contracted = o.get("contracted")
-        tail = " contracted" if contracted else ""
+        moq = o.get("minimumOrderQty", o.get("minimum_order_qty"))
+        currency_ok = o.get("currencyMatchesRequest", o.get("currency_matches_request"))
+        relation = o.get("vendorRelation") or o.get("vendor_relation") or {}
+        preferred = relation.get("preferredVendor", relation.get("preferred_vendor")) if isinstance(relation, dict) else None
+        strength = relation.get("relationshipStrength", relation.get("relationship_strength")) if isinstance(relation, dict) else None
+        risk = relation.get("riskLevel", relation.get("risk_level")) if isinstance(relation, dict) else None
         per = f" per {sell_unit}" if sell_unit else ""
+        flags: list[str] = []
+        if contracted:
+            flags.append("contracted")
+        if preferred:
+            flags.append("preferred")
+        if currency_ok is False:
+            flags.append("currency_mismatch")
+        flag_tail = (" " + " ".join(flags)) if flags else ""
+        rel_bits: list[str] = []
+        if strength is not None:
+            rel_bits.append(f"strength={strength}")
+        if risk:
+            rel_bits.append(f"risk={risk}")
+        rel_tail = (" " + " ".join(rel_bits)) if rel_bits else ""
         lines.append(
-            f"- vendorId={vendor_id} price={unit_price} {currency}{per} lead={lead} availability={availability}{tail}"
+            f"- vendorId={vendor_id} price={unit_price} {currency}{per} lead={lead} moq={moq} availability={availability}{flag_tail}{rel_tail}"
         )
     if len(offers) > 10:
         lines.append(f"... ({len(offers) - 10} more)")

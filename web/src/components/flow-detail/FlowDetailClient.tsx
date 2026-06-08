@@ -37,6 +37,19 @@ function pillForStatus(
   return { kind: 'idle', text: labels.pending }
 }
 
+const ESCALATION_SOURCE_LABELS: Record<string, string> = {
+  no_vendors_discovered: 'no vendors in catalog',
+  vendors_all_filtered: 'all vendors filtered out',
+  no_vendor_available: 'no vendor available',
+  negotiator_stall: 'negotiation stalled',
+  po_rejected: 'PO rejected by vendor',
+  invoice_correction_pending: 'invoice correction pending',
+}
+
+function escalationSourceLabel(source: string): string {
+  return ESCALATION_SOURCE_LABELS[source] ?? source.replace(/_/g, ' ')
+}
+
 function selectedVendorName(flow: ActiveFlow): string | null {
   const winner = flow.vendors.find((v) => v.status === 'WON')
   if (winner) return winner.name
@@ -285,7 +298,9 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
         >
           <div className="row between" style={{ alignItems: 'flex-start', gap: 12 }}>
             <div>
-              <div className="t-sm upper muted">Escalation · {escalation.source.replace(/_/g, ' ')}</div>
+              <div className="t-sm upper muted">
+                Escalation · {escalationSourceLabel(escalation.source)}
+              </div>
               <div style={{ marginTop: 4 }}>{escalation.reason}</div>
               {escalation.recommendedAction && (
                 <div className="t-xs muted" style={{ marginTop: 6 }}>
@@ -649,7 +664,7 @@ function EmptyFlowBody() {
       <div className="empty" style={{ padding: '40px 28px', marginTop: 0 }}>
         <pre className="ascii-mark">──── agents starting ────</pre>
         <div className="muted t-sm">
-          The buyer agent is processing this request. Vendor search and RFQ broadcast will follow.
+          The buyer agent is processing this request. Vendor discovery will run, then RFQs go out during negotiation.
         </div>
         <div style={{ marginTop: 18 }} className="thinking">
           analyzing spec against catalog
