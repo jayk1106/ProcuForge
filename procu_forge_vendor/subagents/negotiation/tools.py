@@ -17,7 +17,7 @@ from procu_forge_vendor.state_keys import (
     VENDOR_IS_FINAL_KEY,
 )
 
-_MAX_ROUNDS = 3
+_MAX_ROUNDS = 5
 _PRICE_EPSILON = 0.01
 
 
