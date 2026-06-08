@@ -241,6 +241,45 @@ def transition_to_escalated(state: MutableMapping[str, Any]) -> None:
     _set(state, current, PrStatus.ESCALATED)
 
 
+def transition_to_po_rejected(state: MutableMapping[str, Any]) -> None:
+    """PO_ISSUED -> PO_REJECTED when vendor rejects the PO."""
+    current = _parse_current(state.get(PR_STATUS_KEY))
+    if current == PrStatus.PO_REJECTED:
+        return
+    if current != PrStatus.PO_ISSUED:
+        return
+    _set(state, current, PrStatus.PO_REJECTED)
+
+
+def transition_to_invoice_correction_pending(state: MutableMapping[str, Any]) -> None:
+    """INVOICE_UNDER_VERIFICATION -> INVOICE_CORRECTION_PENDING on mismatch."""
+    current = _parse_current(state.get(PR_STATUS_KEY))
+    if current == PrStatus.INVOICE_CORRECTION_PENDING:
+        return
+    if current not in {
+        PrStatus.INVOICE_UNDER_VERIFICATION,
+        PrStatus.INVOICE_CORRECTION_PENDING,
+    }:
+        return
+    _set(state, current, PrStatus.INVOICE_CORRECTION_PENDING)
+
+
+def transition_resume_for_escalated(state: MutableMapping[str, Any]) -> bool:
+    """Restore pr_status from previous_pr_status after human resolves escalation."""
+    current = _parse_current(state.get(PR_STATUS_KEY))
+    if current != PrStatus.ESCALATED:
+        return False
+    prev_raw = state.get(PREVIOUS_PR_STATUS_KEY)
+    if not prev_raw:
+        return False
+    try:
+        prev = PrStatus(str(prev_raw))
+    except ValueError:
+        return False
+    _set(state, current, prev)
+    return True
+
+
 # ── HITL approval gates ───────────────────────────────────────────────────────
 #
 # Gate setters move pr_status FROM the active purchase-phase value TO an

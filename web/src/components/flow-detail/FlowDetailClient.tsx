@@ -1,7 +1,7 @@
 'use client'
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { approveWorkflow, getWorkflowDetail, getWorkflowState } from '@/lib/api-client'
+import { approveWorkflow, getWorkflowDetail, getWorkflowState, resolveWorkflowEscalation } from '@/lib/api-client'
 import { fmtMoney } from '@/lib/format'
 import type { ActiveFlow, PhaseStatus } from '@/types'
 import { useChatContext } from '@/components/layout/ChatContext'
@@ -53,6 +53,7 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
   const [flow, setFlow] = useState<ActiveFlow | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [approving, setApproving] = useState(false)
+  const [resolvingEscalation, setResolvingEscalation] = useState(false)
   const [activeSec, setActiveSec] = useState('neg')
 
   // load() only mutates `flow`/`error`; no loading flag. The render below
@@ -79,6 +80,17 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
     },
     debugLabel: 'flow',
   })
+
+  async function handleResolveEscalation() {
+    setResolvingEscalation(true)
+    try {
+      await resolveWorkflowEscalation(workflowId)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Resolve escalation failed')
+    } finally {
+      setResolvingEscalation(false)
+    }
+  }
 
   async function handleApprove() {
     setApproving(true)
@@ -147,6 +159,10 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
   // The HITL gates render per-section CTAs, so suppress the global ActionBanner
   // when one is active — otherwise the user sees two approve buttons.
   const showAction = flow.needsAction && !pending
+  const escalation = flow.escalationContext ?? null
+  const showEscalationBanner = Boolean(escalation)
+  const canResolveEscalation =
+    flow.prStatus === 'ESCALATED' && escalation?.tier === 'full'
 
   const approvalCta = (
     step: 'po' | 'grn' | 'completion',
@@ -257,6 +273,39 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
         />
       )}
 
+      {showEscalationBanner && escalation && (
+        <div
+          className="action-banner"
+          style={{
+            marginTop: 12,
+            padding: '12px 16px',
+            border: '1px solid var(--warn, #c9a227)',
+            background: 'var(--surface-2, rgba(201, 162, 39, 0.08))',
+          }}
+        >
+          <div className="row between" style={{ alignItems: 'flex-start', gap: 12 }}>
+            <div>
+              <div className="t-sm upper muted">Escalation · {escalation.source.replace(/_/g, ' ')}</div>
+              <div style={{ marginTop: 4 }}>{escalation.reason}</div>
+              {escalation.recommendedAction && (
+                <div className="t-xs muted" style={{ marginTop: 6 }}>
+                  {escalation.recommendedAction}
+                </div>
+              )}
+            </div>
+            {canResolveEscalation && (
+              <button
+                className="btn accent"
+                disabled={resolvingEscalation}
+                onClick={handleResolveEscalation}
+              >
+                [ {resolvingEscalation ? 'resolving…' : 'resolve escalation'} ]
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       <Timeline
         phase={isEmpty ? 'rfq' : flow.currentPhase}
         durations={flow.phaseDurations}
@@ -343,7 +392,13 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
                   }
                 >
                   {flow.vendors.length > 0 ? (
-                    <NegotiationBoard vendors={flow.vendors} />
+                    <NegotiationBoard
+                      vendors={flow.vendors}
+                      onResolveEscalation={
+                        canResolveEscalation ? handleResolveEscalation : undefined
+                      }
+                      resolvingEscalation={resolvingEscalation}
+                    />
                   ) : (
                     <PendingPlaceholder label="Vendor search and negotiation in progress." />
                   )}

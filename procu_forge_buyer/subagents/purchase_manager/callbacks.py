@@ -18,10 +18,10 @@ from ...callbacks import (
     managed_log_before_handler,
 )
 from ...pr_status import PrStatus
+from ...escalation import maybe_escalate_full
 from ...pr_status_transitions import (
     pr_status_line,
     sync_purchase_pr_status_from_acks,
-    transition_to_escalated,
 )
 from ...state_keys import (
     PLANNER_PLAN_KEY,
@@ -176,7 +176,11 @@ def purchase_manager_after_agent(callback_context: CallbackContext) -> None:
                 current,
                 current_snap,
             )
-            transition_to_escalated(state)
+            maybe_escalate_full(
+                state,
+                source="purchase_stall",
+                reason=f"No progress for {streak} turns at {current}",
+            )
             log_purchase_manager_after_agent(callback_context)
             return None
 

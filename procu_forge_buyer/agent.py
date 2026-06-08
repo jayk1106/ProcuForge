@@ -11,6 +11,8 @@ from .callbacks import (
     manage_log_before_pr_router,
     repair_purchase_status_callback,
     stop_loop_if_terminal,
+    track_loop_iteration,
+    detect_loop_exhaustion,
 )
 from .subagents.vendor_search import vendor_search_agent
 from .subagents.negotiator import negotiator_agent
@@ -111,8 +113,8 @@ root_agent = LoopAgent(
     ),
     sub_agents=[pr_router],
     max_iterations=25,
-    before_agent_callback=manage_log_before_orchestrator,
-    after_agent_callback=manage_log_after_orchestrator,
+    before_agent_callback=[track_loop_iteration, manage_log_before_orchestrator],
+    after_agent_callback=[manage_log_after_orchestrator, detect_loop_exhaustion],
 )
 
 configure_buyer_logging()

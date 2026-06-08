@@ -174,6 +174,35 @@ class APISettings(BaseSettings):
         validation_alias="SESSION_COOKIE_NAME",
     )
 
+    mailgun_mcp_enabled: bool = Field(
+        default=False,
+        validation_alias="MAILGUN_MCP_ENABLED",
+        description="When true, send escalation notification emails via Mailgun.",
+    )
+    mailgun_api_key: str = Field(
+        default="",
+        validation_alias="MAILGUN_API_KEY",
+    )
+    mailgun_domain: str = Field(
+        default="",
+        validation_alias="MAILGUN_DOMAIN",
+    )
+    mailgun_from_email: str = Field(
+        default="",
+        validation_alias="MAILGUN_FROM_EMAIL",
+        description="From address for escalation emails.",
+    )
+    escalation_notify_email: str = Field(
+        default="",
+        validation_alias="ESCALATION_NOTIFY_EMAIL",
+        description="Fallback recipient when requester email cannot be resolved.",
+    )
+    escalation_web_base_url: str = Field(
+        default="http://localhost:3000",
+        validation_alias="ESCALATION_WEB_BASE_URL",
+        description="Base URL for workflow deep links in escalation emails.",
+    )
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_cors_origins(cls, value: object) -> object:

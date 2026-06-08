@@ -165,3 +165,6 @@ class WorkflowDetailDTO(BaseModel):
         default=None, alias="pendingApproval"
     )
     approved_steps: list[str] = Field(default_factory=list, alias="approvedSteps")
+    escalation_context: dict[str, Any] | None = Field(
+        default=None, alias="escalationContext"
+    )

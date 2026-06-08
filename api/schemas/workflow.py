@@ -192,3 +192,10 @@ class WorkflowApproveResponse(BaseModel):
     workflow_id: str
     status: Literal["approved"] = "approved"
     approved_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class WorkflowResolveEscalationResponse(BaseModel):
+    workflow_id: str
+    status: Literal["resolved"] = "resolved"
+    resolved_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    resumed_pr_status: str | None = None

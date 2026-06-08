@@ -8,7 +8,9 @@ from db.collections.vendor_product import VendorProduct
 from db.firestore.client import get_firestore_client
 from db.firestore.repositories.vendor_products import VendorProductRepository
 
+from ...pr_status import PrStatus
 from ...pr_status_transitions import transition_after_vendor_discovery
+from ...escalation import maybe_notify_only
 from ...state_keys import VENDOR_OFFERS_KEY
 from .schema import ProductVendorOffers, VendorOffer
 
@@ -60,6 +62,12 @@ async def load_vendor_offers_for_product(tool_context: ToolContext) -> dict[str,
     payload = block.model_dump(mode="json", by_alias=True)
     tool_context.state[VENDOR_OFFERS_KEY] = payload
     transition_after_vendor_discovery(tool_context.state, offer_count=len(offers))
+    if len(offers) == 0:
+        maybe_notify_only(
+            tool_context.state,
+            source="no_vendors_discovered",
+            reason="No suppliers found for product — human may onboard vendors or fix catalog data",
+        )
 
     return {
         "ok": True,

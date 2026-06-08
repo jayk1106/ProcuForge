@@ -49,3 +49,11 @@ NEGOTIATOR_COMMS_SNAPSHOT_KEY = "negotiator_comms_snapshot"
 # Count of consecutive negotiator turns that produced no new communications.
 # Resets to 0 on any turn that makes progress. Used for the stall-guard force-close.
 NEGOTIATOR_STALL_STREAK_KEY = "negotiator_stall_streak"
+
+# Escalation notification (written by buyer agent; email sent by API layer)
+ESCALATION_CONTEXT_KEY = "escalation_context"
+ESCALATION_PENDING_NOTIFY_KEY = "escalation_pending_notify"
+ESCALATION_EMAIL_SENT_AT_KEY = "escalation_email_sent_at"
+INVOICE_CORRECTION_ROUNDS_KEY = "invoice_correction_rounds"
+PO_REJECTION_COUNT_KEY = "po_rejection_count"
+LOOP_ITERATION_KEY = "loop_iteration"

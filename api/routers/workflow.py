@@ -12,7 +12,7 @@ from api.dependencies import (
     get_current_admin,
 )
 from api.schemas.ui_dto import VendorConvoDTO, VendorThreadRowDTO, WorkflowDetailDTO, WorkflowRowDTO
-from api.schemas.workflow import WorkflowApproveResponse, WorkflowStartRequest, WorkflowStartResponse
+from api.schemas.workflow import WorkflowApproveResponse, WorkflowResolveEscalationResponse, WorkflowStartRequest, WorkflowStartResponse
 from api.schemas.workflow_chat import WorkflowAskRequest, WorkflowAskResponse
 
 router = APIRouter(
@@ -115,6 +115,28 @@ async def approve_workflow(
     """
     response, job = await service.approve(workflow_id)
     background_tasks.add_task(service.run_agent, job)
+    return response
+
+
+@router.post(
+    "/{workflow_id}/resolve-escalation",
+    response_model=WorkflowResolveEscalationResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Resolve a full-tier workflow escalation and resume the agent",
+    responses={
+        404: {"description": "Workflow not found."},
+        422: {"description": "Workflow is not in a resolvable escalation state."},
+        503: {"description": "Workflow runtime is not configured."},
+    },
+)
+async def resolve_workflow_escalation(
+    workflow_id: str,
+    background_tasks: BackgroundTasks,
+    service: WorkflowServiceDep,
+) -> WorkflowResolveEscalationResponse:
+    response, job = await service.resolve_escalation(workflow_id)
+    if job is not None:
+        background_tasks.add_task(service.run_agent, job)
     return response
 
 

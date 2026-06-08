@@ -20,6 +20,7 @@ from ...callbacks import (
     managed_log_before_handler,
 )
 from ...communication_validate import CommunicationSchemaError, validate_communication_message
+from ...escalation import maybe_escalate_full, maybe_notify_only
 from ...pr_status_transitions import (
     _targeted_vendor_ids,
     pr_status_line,
@@ -134,6 +135,39 @@ def negotiator_before_agent_with_transition(callback_context: CallbackContext) -
     return None
 
 
+def _all_vendors_max_rounds(state: dict[str, Any], targeted: list[str]) -> bool:
+    """True when every targeted vendor closed with WALKAWAY(MAX_ROUNDS_REACHED)."""
+    if not targeted:
+        return False
+    nego = state.get(NEGOTIATION_CONFIG_KEY) or {}
+    for vid in targeted:
+        config = nego.get(vid)
+        if not isinstance(config, dict) or not config.get("done"):
+            return False
+        comms = config.get("communications") or []
+        if not comms or not isinstance(comms[-1], dict):
+            return False
+        last = comms[-1]
+        if last.get("message_type") != "WALKAWAY":
+            return False
+        payload = last.get("payload") or {}
+        if str(payload.get("reason") or "") != "MAX_ROUNDS_REACHED":
+            return False
+    return True
+
+
+def _any_vendor_accepted(state: dict[str, Any], targeted: list[str]) -> bool:
+    nego = state.get(NEGOTIATION_CONFIG_KEY) or {}
+    for vid in targeted:
+        config = nego.get(vid)
+        if not isinstance(config, dict):
+            continue
+        for msg in config.get("communications") or []:
+            if isinstance(msg, dict) and msg.get("message_type") == "ACCEPT":
+                return True
+    return False
+
+
 def _force_close_stalled_vendors(
     callback_context: CallbackContext,
     targeted: list[str],
@@ -193,8 +227,22 @@ def negotiator_after_agent_with_transition(callback_context: CallbackContext) ->
         state[NEGOTIATOR_STALL_STREAK_KEY] = streak
         if streak >= 2:
             _force_close_stalled_vendors(callback_context, targeted, streak)
+            if not _any_vendor_accepted(state, targeted):
+                maybe_escalate_full(
+                    state,
+                    source="negotiator_stall",
+                    reason="Negotiation stalled — force-closed vendors with no progress",
+                )
 
     transition_after_negotiation(state)
+
+    if _all_vendors_max_rounds(state, targeted):
+        maybe_notify_only(
+            state,
+            source="negotiation_max_rounds",
+            reason="All vendors reached max negotiation rounds without agreement",
+        )
+
     log_negotiator_after_agent(callback_context)
     return None
 

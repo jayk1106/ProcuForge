@@ -93,6 +93,19 @@ export interface ActiveFlow {
   approvalRequired?: boolean
   approvedSteps?: ApprovalStep[]
   pendingApproval?: PendingApproval | null
+  escalationContext?: EscalationContext | null
+}
+
+export interface EscalationContext {
+  tier: 'notify_only' | 'full'
+  source: string
+  reason: string
+  triggerStatus?: string
+  phase?: string
+  vendorId?: string | null
+  rfqId?: string | null
+  triggeredAt?: string
+  recommendedAction?: string | null
 }
 
 export type ApprovalStep = 'po' | 'grn' | 'completion'

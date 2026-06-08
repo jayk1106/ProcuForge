@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from communication.schema import MessageType
 from procu_forge_buyer.pr_status import PrStatus
 from procu_forge_buyer.state_keys import (
+    ESCALATION_CONTEXT_KEY,
+    ESCALATION_PENDING_NOTIFY_KEY,
     GRN_KEY,
     INVOICE_KEY,
     INVOICE_VENDOR_ACK_KEY,
@@ -453,6 +455,8 @@ def test_stall_guard_escalates_outside_purchase_phase():
 
     assert state[PR_STATUS_KEY] == PrStatus.ESCALATED.value
     assert state[PURCHASE_STALL_STREAK_KEY] == 2
+    assert state[ESCALATION_PENDING_NOTIFY_KEY] is True
+    assert state[ESCALATION_CONTEXT_KEY]["source"] == "purchase_stall"
 
 
 def test_stall_guard_does_not_escalate_during_po_issued():

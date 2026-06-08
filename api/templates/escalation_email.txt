@@ -1,0 +1,23 @@
+Procurement Escalation — {workflow_id}
+======================================
+
+Reason: {reason}
+Source: {source}
+Tier: {tier}
+Status: {trigger_status}
+Phase: {phase}
+
+Workflow: {workflow_id}
+Request: {request_id}
+Product: {product_label}
+Quantity: {quantity}
+
+{vendor_block}
+
+Recommended action:
+{recommended_action}
+
+Open workflow: {deep_link}
+
+---
+This is an automated notification from ProcuForge.

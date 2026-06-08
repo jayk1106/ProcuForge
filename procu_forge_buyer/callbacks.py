@@ -18,7 +18,7 @@ from .pr_status_transitions import (
     pr_status_line,
     sync_purchase_pr_status_from_acks,
 )
-from .state_keys import PLANNER_PLAN_KEY, PR_STATUS_KEY
+from .state_keys import LOOP_ITERATION_KEY, PLANNER_PLAN_KEY, PR_STATUS_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +164,48 @@ manage_log_before_orchestrator = partial(
 manage_log_after_orchestrator = partial(
     managed_log_after_handler, span="ORCHESTRATOR", detail_line=_orch_after, trailing_lines=None
 )
+
+
+def track_loop_iteration(callback_context: CallbackContext) -> None:
+    """Increment loop iteration counter for exhaustion detection."""
+    state = callback_context.state
+    count = int(state.get(LOOP_ITERATION_KEY) or 0) + 1
+    state[LOOP_ITERATION_KEY] = count
+    return None
+
+
+_MAX_LOOP_ITERATIONS = 25
+
+
+def detect_loop_exhaustion(callback_context: CallbackContext) -> None:
+    """Escalate when the loop reaches max_iterations without reaching a stop status."""
+    from .escalation import maybe_escalate_full
+
+    state = callback_context.state
+    iteration = int(state.get(LOOP_ITERATION_KEY) or 0)
+    if iteration < _MAX_LOOP_ITERATIONS:
+        return None
+
+    status_raw = state.get(PR_STATUS_KEY)
+    try:
+        status = PrStatus(str(status_raw)) if status_raw else PrStatus.INITIATED
+    except ValueError:
+        status = PrStatus.INITIATED
+
+    if status in STOP_PR_STATUSES or status in {
+        PrStatus.COMPLETED,
+        PrStatus.CANCELLED,
+        PrStatus.NO_VENDORS_DISCOVERED,
+        PrStatus.NO_VENDOR_AVAILABLE,
+    }:
+        return None
+
+    maybe_escalate_full(
+        state,
+        source="loop_exhausted",
+        reason="Agent loop reached max_iterations without completing workflow",
+    )
+    return None
 
 
 def _pr_router_before(ctx: CallbackContext, st: dict[str, Any]) -> str:

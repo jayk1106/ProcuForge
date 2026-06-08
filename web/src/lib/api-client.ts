@@ -119,6 +119,15 @@ export async function approveWorkflow(id: string): Promise<{ workflow_id: string
   )
 }
 
+export async function resolveWorkflowEscalation(
+  id: string
+): Promise<{ workflow_id: string; status: string; resumed_pr_status?: string | null }> {
+  return apiFetch<{ workflow_id: string; status: string; resumed_pr_status?: string | null }>(
+    `/api/v1/workflow/${id}/resolve-escalation`,
+    { method: 'POST' }
+  )
+}
+
 export async function getWorkflowState(id: string): Promise<Record<string, unknown>> {
   return apiFetch<Record<string, unknown>>(`/api/v1/workflow/${id}/state`)
 }

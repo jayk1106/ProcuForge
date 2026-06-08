@@ -21,27 +21,34 @@ from google.adk.tools.base_tool import ToolContext
 from communication import A2AMessageBuilder
 from procu_forge_buyer.a2a_client import call_vendor
 from procu_forge_buyer.pr_status import PrStatus
+from procu_forge_buyer.escalation import maybe_escalate_full
 from procu_forge_buyer.pr_status_transitions import (
     transition_to_awaiting_completion_approval,
     transition_to_awaiting_grn_approval,
     transition_to_awaiting_po_approval,
+    transition_to_invoice_correction_pending,
+    transition_to_po_rejected,
 )
 from procu_forge_buyer.purchase_a2a import (
+    is_po_rejection,
     parse_vendor_envelope,
     validate_invoice_submitted,
     validate_po_acknowledged,
     validate_process_complete_ack,
     vendor_error,
+    verify_invoice_against_po,
 )
 from procu_forge_buyer.state_keys import (
     APPROVAL_REQUIRED_KEY,
     APPROVED_STEPS_KEY,
     GRN_KEY,
+    INVOICE_CORRECTION_ROUNDS_KEY,
     INVOICE_KEY,
     INVOICE_VENDOR_ACK_KEY,
     NEGOTIATION_CONFIG_KEY,
     PENDING_APPROVAL_KEY,
     PO_KEY,
+    PO_REJECTION_COUNT_KEY,
     PO_VENDOR_ACK_KEY,
     PR_STATUS_KEY,
     PROCESS_COMPLETE_KEY,
@@ -57,6 +64,9 @@ GRN_STEP = "grn"
 COMPLETION_STEP = "completion"
 
 _LOG = logging.getLogger(__name__)
+
+_PO_REJECT_ESCALATE_THRESHOLD = 2
+_INVOICE_CORRECTION_ESCALATE_THRESHOLD = 3
 
 
 def _broadcast_vendor_thread(
@@ -497,6 +507,18 @@ async def send_po(tool_context: ToolContext) -> dict[str, Any]:
 
     validation_err = validate_po_acknowledged(ack_env, expected_po_number=po_record["po_number"])
     if validation_err:
+        if is_po_rejection(ack_env):
+            count = int(tool_context.state.get(PO_REJECTION_COUNT_KEY) or 0) + 1
+            tool_context.state[PO_REJECTION_COUNT_KEY] = count
+            transition_to_po_rejected(tool_context.state)
+            if count >= _PO_REJECT_ESCALATE_THRESHOLD:
+                maybe_escalate_full(
+                    tool_context.state,
+                    source="po_rejected",
+                    reason=validation_err,
+                    vendor_id=vendor_id,
+                    rfq_id=config.get("rfq_id"),
+                )
         return {
             "ok": False,
             "error": validation_err,
@@ -608,6 +630,27 @@ async def send_grn_created(tool_context: ToolContext) -> dict[str, Any]:
             "ok": False,
             "error": validation_err or "invalid INVOICE_SUBMITTED envelope",
             "vendor_reply": inv_env,
+        }
+
+    mismatches = verify_invoice_against_po(invoice_payload, po)
+    if mismatches:
+        rounds = int(tool_context.state.get(INVOICE_CORRECTION_ROUNDS_KEY) or 0) + 1
+        tool_context.state[INVOICE_CORRECTION_ROUNDS_KEY] = rounds
+        transition_to_invoice_correction_pending(tool_context.state)
+        mismatch_detail = "; ".join(mismatches)
+        if rounds >= _INVOICE_CORRECTION_ESCALATE_THRESHOLD:
+            maybe_escalate_full(
+                tool_context.state,
+                source="invoice_mismatch",
+                reason=f"Invoice failed 3-way match after {rounds} correction rounds: {mismatch_detail}",
+                vendor_id=vendor_id,
+                rfq_id=config.get("rfq_id"),
+            )
+        return {
+            "ok": False,
+            "error": f"invoice mismatch (round {rounds}): {mismatch_detail}",
+            "vendor_reply": inv_env,
+            "correction_round": rounds,
         }
 
     tool_context.state[INVOICE_KEY] = invoice_payload

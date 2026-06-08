@@ -39,6 +39,7 @@ from db.collections.workflow_event import WorkflowEventDoc
 from procu_forge_buyer.state_keys import (
     APPROVAL_REQUIRED_KEY,
     APPROVED_STEPS_KEY,
+    ESCALATION_CONTEXT_KEY,
     GRN_KEY,
     INVOICE_KEY,
     NEGOTIATION_CONFIG_KEY,
@@ -150,7 +151,10 @@ def _event_to_activity(event: WorkflowEventDoc) -> ActivityItemDTO:
     ts = event.ts.strftime("%Y-%m-%d %H:%M") if event.ts else ""
     payload = event.payload if isinstance(event.payload, dict) else {}
     detail = _activity_detail_for_event(event.event_type, payload)
-    return ActivityItemDTO(ts=ts, ag=event.author or "system", det=detail)
+    agent = event.author or "system"
+    if event.event_type == "workflow_escalated":
+        agent = "EscalationAgent"
+    return ActivityItemDTO(ts=ts, ag=agent, det=detail)
 
 
 def _activity_detail_for_event(event_type: str, payload: dict[str, Any]) -> str:
@@ -166,6 +170,8 @@ def _activity_detail_for_event(event_type: str, payload: dict[str, Any]) -> str:
         return f"Escalated thread {payload.get('rfq_id', '?')}"
     if event_type == "vendor_thread_walked_away":
         return f"Walked away from thread {payload.get('rfq_id', '?')}"
+    if event_type == "workflow_escalated":
+        return f"Escalation: {payload.get('reason') or payload.get('source') or 'human review required'}"
     return event_type.replace("_", " ")
 
 
@@ -375,6 +381,11 @@ def workflow_detail_from_state(
             list(state.get(APPROVED_STEPS_KEY))
             if isinstance(state.get(APPROVED_STEPS_KEY), list)
             else []
+        ),
+        escalationContext=(
+            state.get(ESCALATION_CONTEXT_KEY)
+            if isinstance(state.get(ESCALATION_CONTEXT_KEY), dict)
+            else None
         ),
     )
 

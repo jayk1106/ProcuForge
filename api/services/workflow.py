@@ -12,6 +12,7 @@ from api.schemas.buyer_workflow_session import BuyerWorkflowSessionState
 from api.schemas.workflow import (
     BuyerSessionRequestState,
     WorkflowApproveResponse,
+    WorkflowResolveEscalationResponse,
     WorkflowStartRequest,
     WorkflowStartResponse,
 )
@@ -203,6 +204,10 @@ class WorkflowService:
             # top-level state_delta on the events we observed.
             _emit_state("runner_complete")
             logger.info("workflow.run.complete workflow_id=%s", job.workflow_id)
+
+            from api.services.escalation_notifications import schedule_notify_if_pending
+
+            schedule_notify_if_pending(job.workflow_id)
         except Exception:
             logger.exception(
                 "workflow.run.failed workflow_id=%s",
@@ -338,6 +343,114 @@ class WorkflowService:
             prompt=(
                 f"Continue procurement workflow {workflow_id}. "
                 f"The {step} step has been approved — proceed with purchase_manager_agent."
+            ),
+        )
+        return response, job
+
+    async def resolve_escalation(
+        self, workflow_id: str
+    ) -> tuple[WorkflowResolveEscalationResponse, AgentJob | None]:
+        """Restore pr_status after full-tier ESCALATED and re-kick the agent."""
+        from google.adk.events.event import Event
+        from google.adk.events.event_actions import EventActions
+        from google.adk.sessions import VertexAiSessionService
+
+        from procu_forge_buyer.pr_status import PrStatus
+        from procu_forge_buyer.pr_status_transitions import transition_resume_for_escalated
+        from procu_forge_buyer.state_keys import (
+            ESCALATION_CONTEXT_KEY,
+            ESCALATION_EMAIL_SENT_AT_KEY,
+            ESCALATION_PENDING_NOTIFY_KEY,
+            PR_STATUS_KEY,
+            PREVIOUS_PR_STATUS_KEY,
+        )
+
+        self._ensure_vertex_configured()
+
+        session_service = VertexAiSessionService(
+            project=self._settings.vertex_project_id,
+            location=self._settings.vertex_location,
+        )
+        user_id = self._settings.workflow_default_user_id or ""
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="WORKFLOW_DEFAULT_USER_ID is not configured.",
+            )
+
+        session = await session_service.get_session(
+            app_name=self._settings.reasoning_engine_app_name,
+            user_id=user_id,
+            session_id=workflow_id,
+        )
+        if session is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Workflow '{workflow_id}' not found.",
+            )
+
+        state = session.state if isinstance(session.state, dict) else {}
+        current_status = str(state.get(PR_STATUS_KEY) or "")
+
+        if current_status != PrStatus.ESCALATED.value:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Workflow is not in ESCALATED status. Current status: {current_status!r}"
+                ),
+            )
+
+        mutable = dict(state)
+        if not transition_resume_for_escalated(mutable):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Cannot resolve escalation — previous pr_status missing.",
+            )
+        resume_status = str(mutable.get(PR_STATUS_KEY) or "")
+
+        resolved_at = datetime.now(timezone.utc)
+        state_event = Event(
+            invocation_id=f"resolve-escalation-{uuid.uuid4().hex}",
+            author="api:resolve_escalation",
+            actions=EventActions(
+                state_delta={
+                    PR_STATUS_KEY: resume_status,
+                    PREVIOUS_PR_STATUS_KEY: PrStatus.ESCALATED.value,
+                    ESCALATION_CONTEXT_KEY: None,
+                    ESCALATION_PENDING_NOTIFY_KEY: False,
+                    ESCALATION_EMAIL_SENT_AT_KEY: None,
+                }
+            ),
+        )
+        await session_service.append_event(session, state_event)
+
+        from api.services.workflow_query import build_workflow_detail
+        from api.ws import broadcast_state
+
+        broadcast_state(
+            workflow_id,
+            lambda: build_workflow_detail(workflow_id),
+            reason="resolve_escalation",
+            workflow_id=workflow_id,
+        )
+
+        if self._index_repo is not None:
+            await self._index_repo.update_fields(
+                workflow_id,
+                {"prStatus": resume_status, "needsAction": False},
+            )
+
+        response = WorkflowResolveEscalationResponse(
+            workflow_id=workflow_id,
+            resolved_at=resolved_at,
+            resumed_pr_status=resume_status or None,
+        )
+        job = AgentJob(
+            workflow_id=workflow_id,
+            user_id=user_id,
+            prompt=(
+                f"Continue procurement workflow {workflow_id}. "
+                f"Escalation was resolved — resume from pr_status {resume_status}."
             ),
         )
         return response, job

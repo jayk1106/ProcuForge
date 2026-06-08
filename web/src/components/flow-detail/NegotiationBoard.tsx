@@ -7,6 +7,8 @@ import type { ActiveVendor } from '@/types'
 
 interface NegotiationBoardProps {
   vendors: ActiveVendor[]
+  onResolveEscalation?: () => void
+  resolvingEscalation?: boolean
 }
 
 function NegotiationStatus({ v }: { v: ActiveVendor }) {
@@ -17,7 +19,11 @@ function NegotiationStatus({ v }: { v: ActiveVendor }) {
   return <StatusPill kind="go">negotiating</StatusPill>
 }
 
-export function NegotiationBoard({ vendors }: NegotiationBoardProps) {
+export function NegotiationBoard({
+  vendors,
+  onResolveEscalation,
+  resolvingEscalation = false,
+}: NegotiationBoardProps) {
   const router = useRouter()
 
   function openConvo(v: ActiveVendor) {
@@ -93,8 +99,14 @@ export function NegotiationBoard({ vendors }: NegotiationBoardProps) {
             {v.status === 'NEGOTIATING' && !v.escalated && (
               <button className="btn tiny">[ accept ]</button>
             )}
-            {v.escalated && (
-              <button className="btn tiny accent">[ resolve escalation ]</button>
+            {v.escalated && onResolveEscalation && (
+              <button
+                className="btn tiny accent"
+                disabled={resolvingEscalation}
+                onClick={onResolveEscalation}
+              >
+                [ {resolvingEscalation ? 'resolving…' : 'resolve escalation'} ]
+              </button>
             )}
           </div>
         </article>
