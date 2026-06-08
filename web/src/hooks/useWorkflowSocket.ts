@@ -111,10 +111,8 @@ export function useWorkflowSocket<T>(
 
       sock.onmessage = (ev) => {
         let parsed: ServerEnvelope<T> | { type?: string } | null = null
-        console.log('ev.data', ev)
         try {
           parsed = JSON.parse(ev.data) as ServerEnvelope<T> | { type?: string }
-          console.log('parsed', parsed)
         } catch {
           wsLog(debugLabel, 'parse-failed', { bytes: (ev.data as string)?.length })
           return

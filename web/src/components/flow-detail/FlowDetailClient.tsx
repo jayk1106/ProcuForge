@@ -167,7 +167,11 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
     )
   }
 
-  const isEmpty = flow.vendors.length === 0 && flow.currentPhase === 'rfq'
+  const isEmpty =
+    flow.vendors.length === 0 &&
+    (flow.discoveredVendors?.length ?? 0) === 0 &&
+    flow.specDone === false &&
+    flow.currentPhase === 'rfq'
   const pending = flow.pendingApproval ?? null
   // The HITL gates render per-section CTAs, so suppress the global ActionBanner
   // when one is active — otherwise the user sees two approve buttons.
@@ -337,15 +341,12 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
         />
 
         <main>
-          {isEmpty ? (
-            <EmptyFlowBody />
-          ) : (
-            <>
-              <div id="sec-spec">
+          <div id="sec-spec">
                 <Section
+                  key={`spec-${flow.specDone !== false ? 'done' : 'validating'}`}
                   title="Specification & approval"
                   num="1.0"
-                  defaultOpen={false}
+                  defaultOpen
                   status={
                     flow.specDone !== false ? (
                       <StatusPill kind="ok">spec validated</StatusPill>
@@ -367,9 +368,10 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
 
               <div id="sec-discovered">
                 <Section
+                  key={`discovered-${discoveredCount}-${vendorCount > 0 ? 'shortlisted' : 'pending'}`}
                   title="Vendors discovered"
                   num="2.0"
-                  defaultOpen={discoveredCount > 0 && vendorCount === 0}
+                  defaultOpen={discoveredCount > 0}
                   pending={discoveredCount === 0 && phaseStatus.rfq === 'pending'}
                   status={(() => {
                     if (discoveredCount === 0 && phaseStatus.rfq === 'walked') {
@@ -538,8 +540,6 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
                   )}
                 </Section>
               </div>
-            </>
-          )}
         </main>
 
         <ActivityRail items={flow.activity} />
@@ -654,22 +654,6 @@ function PendingPlaceholder({ label }: { label: string }) {
     <div className="row" style={{ gap: 12, color: 'var(--muted)', fontSize: 'var(--t-sm)' }}>
       <Bracketed>pending</Bracketed>
       <span>{label}</span>
-    </div>
-  )
-}
-
-function EmptyFlowBody() {
-  return (
-    <div>
-      <div className="empty" style={{ padding: '40px 28px', marginTop: 0 }}>
-        <pre className="ascii-mark">──── agents starting ────</pre>
-        <div className="muted t-sm">
-          The buyer agent is processing this request. Vendor discovery will run, then RFQs go out during negotiation.
-        </div>
-        <div style={{ marginTop: 18 }} className="thinking">
-          analyzing spec against catalog
-        </div>
-      </div>
     </div>
   )
 }
