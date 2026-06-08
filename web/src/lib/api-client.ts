@@ -123,6 +123,26 @@ export async function getWorkflowState(id: string): Promise<Record<string, unkno
   return apiFetch<Record<string, unknown>>(`/api/v1/workflow/${id}/state`)
 }
 
+export interface ChatTurn {
+  role: 'user' | 'assistant'
+  text: string
+}
+
+export interface AskWorkflowResponse {
+  answer: string
+}
+
+export async function askWorkflow(
+  workflowId: string,
+  question: string,
+  history: ChatTurn[],
+): Promise<AskWorkflowResponse> {
+  return apiFetch<AskWorkflowResponse>(`/api/v1/workflow/${workflowId}/ask`, {
+    method: 'POST',
+    body: JSON.stringify({ question, history }),
+  })
+}
+
 export async function getVendorThreads(): Promise<Vendor[]> {
   return apiFetch<Vendor[]>('/api/v1/vendor-threads')
 }

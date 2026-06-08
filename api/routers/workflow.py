@@ -6,12 +6,14 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 
 from api.dependencies import (
     VendorThreadQueryServiceDep,
+    WorkflowChatServiceDep,
     WorkflowQueryServiceDep,
     WorkflowServiceDep,
     get_current_admin,
 )
 from api.schemas.ui_dto import VendorConvoDTO, VendorThreadRowDTO, WorkflowDetailDTO, WorkflowRowDTO
 from api.schemas.workflow import WorkflowApproveResponse, WorkflowStartRequest, WorkflowStartResponse
+from api.schemas.workflow_chat import WorkflowAskRequest, WorkflowAskResponse
 
 router = APIRouter(
     prefix="/workflow",
@@ -114,3 +116,25 @@ async def approve_workflow(
     response, job = await service.approve(workflow_id)
     background_tasks.add_task(service.run_agent, job)
     return response
+
+
+@router.post(
+    "/{workflow_id}/ask",
+    response_model=WorkflowAskResponse,
+    summary="Ask a question about a workflow's current state",
+    responses={
+        404: {"description": "Workflow not found."},
+        503: {"description": "Workflow chat runtime is not configured."},
+    },
+)
+async def ask_workflow(
+    workflow_id: str,
+    payload: WorkflowAskRequest,
+    service: WorkflowChatServiceDep,
+) -> WorkflowAskResponse:
+    """Answer a buyer's question grounded in a snapshot of the workflow's
+    buyer session state. Nothing is persisted — the chat session lives only
+    for the duration of this request.
+    """
+    answer = await service.ask(workflow_id, payload.question, payload.history)
+    return WorkflowAskResponse(answer=answer)

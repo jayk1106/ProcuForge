@@ -242,7 +242,7 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
             <button className="btn" onClick={load}>
               [ refresh ]
             </button>
-            <button className="btn" onClick={openChat}>
+            <button className="btn" onClick={() => openChat(workflowId)}>
               [ ask about this PR ]
             </button>
           </div>

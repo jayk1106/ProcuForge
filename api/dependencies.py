@@ -11,6 +11,7 @@ from api.schemas.auth import AdminPrincipal
 from api.services.auth_service import decode_session_token
 from api.services.vendor_thread_query import VendorThreadQueryService
 from api.services.workflow import WorkflowService
+from api.services.workflow_chat import WorkflowChatService
 from api.services.workflow_query import WorkflowQueryService
 from db.firestore.client import get_firestore_client
 from db.firestore.repositories.organisations import OrganisationRepository
@@ -118,8 +119,13 @@ def get_vendor_thread_query_service(
     )
 
 
+def get_workflow_chat_service(settings: SettingsDep) -> WorkflowChatService:
+    return WorkflowChatService(settings=settings)
+
+
 WorkflowServiceDep = Annotated[WorkflowService, Depends(get_workflow_service)]
 WorkflowQueryServiceDep = Annotated[WorkflowQueryService, Depends(get_workflow_query_service)]
+WorkflowChatServiceDep = Annotated[WorkflowChatService, Depends(get_workflow_chat_service)]
 VendorThreadQueryServiceDep = Annotated[
     VendorThreadQueryService, Depends(get_vendor_thread_query_service)
 ]
