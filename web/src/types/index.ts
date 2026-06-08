@@ -26,6 +26,10 @@ export interface VendorThread {
   who: 'them' | 'us'
   what: string
   meta: string
+  type?: string
+  round?: number | null
+  ts?: string | null
+  payload?: Record<string, unknown>
 }
 
 export interface ActiveVendor {

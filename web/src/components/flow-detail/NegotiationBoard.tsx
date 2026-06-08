@@ -1,9 +1,9 @@
 'use client'
-import React from 'react'
-import { useRouter } from 'next/navigation'
+import React, { useState } from 'react'
 import { StatusPill } from '@/components/primitives/StatusPill'
 import { fmtMoney, fmtDelta } from '@/lib/format'
-import type { ActiveVendor } from '@/types'
+import type { ActiveVendor, VendorThread } from '@/types'
+import { StepDetailModal } from './StepDetailModal'
 
 interface NegotiationBoardProps {
   vendors: ActiveVendor[]
@@ -19,17 +19,17 @@ function NegotiationStatus({ v }: { v: ActiveVendor }) {
   return <StatusPill kind="go">negotiating</StatusPill>
 }
 
+interface SelectedStep {
+  vendor: ActiveVendor
+  turn: VendorThread
+}
+
 export function NegotiationBoard({
   vendors,
   onResolveEscalation,
   resolvingEscalation = false,
 }: NegotiationBoardProps) {
-  const router = useRouter()
-
-  function openConvo(v: ActiveVendor) {
-    const target = v.rfqId ?? v.id
-    router.push(`/vendors/${target}`)
-  }
+  const [selectedStep, setSelectedStep] = useState<SelectedStep | null>(null)
 
   return (
     <div className="neg-board">
@@ -79,38 +79,55 @@ export function NegotiationBoard({
                   </div>
                 </div>
                 <div>
-                  <div className="what">{t.what}</div>
+                  <div className="row between" style={{ alignItems: 'baseline', gap: 8 }}>
+                    <div className="what">{t.what}</div>
+                    <button
+                      type="button"
+                      className="turn-view"
+                      onClick={() => setSelectedStep({ vendor: v, turn: t })}
+                      aria-label={`View ${t.what} details`}
+                    >
+                      [ view ]
+                    </button>
+                  </div>
                   <div className="meta">{t.meta}</div>
                 </div>
               </div>
             ))}
           </div>
-          <div
-            style={{
-              padding: '10px 14px',
-              borderTop: '1px solid var(--rule)',
-              display: 'flex',
-              gap: 6,
-            }}
-          >
-            <button className="btn tiny" onClick={() => openConvo(v)}>
-              [ open convo ]
-            </button>
-            {v.status === 'NEGOTIATING' && !v.escalated && (
-              <button className="btn tiny">[ accept ]</button>
-            )}
-            {v.escalated && onResolveEscalation && (
-              <button
-                className="btn tiny accent"
-                disabled={resolvingEscalation}
-                onClick={onResolveEscalation}
-              >
-                [ {resolvingEscalation ? 'resolving…' : 'resolve escalation'} ]
-              </button>
-            )}
-          </div>
+          {(v.escalated && onResolveEscalation) ||
+          (v.status === 'NEGOTIATING' && !v.escalated) ? (
+            <div
+              style={{
+                padding: '10px 14px',
+                borderTop: '1px solid var(--rule)',
+                display: 'flex',
+                gap: 6,
+              }}
+            >
+              {v.status === 'NEGOTIATING' && !v.escalated && (
+                <button className="btn tiny">[ accept ]</button>
+              )}
+              {v.escalated && onResolveEscalation && (
+                <button
+                  className="btn tiny accent"
+                  disabled={resolvingEscalation}
+                  onClick={onResolveEscalation}
+                >
+                  [ {resolvingEscalation ? 'resolving…' : 'resolve escalation'} ]
+                </button>
+              )}
+            </div>
+          ) : null}
         </article>
       ))}
+      {selectedStep && (
+        <StepDetailModal
+          vendor={selectedStep.vendor}
+          turn={selectedStep.turn}
+          onClose={() => setSelectedStep(null)}
+        />
+      )}
     </div>
   )
 }

@@ -154,18 +154,25 @@ def _latest_price_from_communications(comms: list[Any]) -> float | None:
     return None
 
 
-def _build_thread_preview(comms: list[Any], limit: int = 3) -> list[dict[str, str]]:
-    preview: list[dict[str, str]] = []
-    for entry in comms[-limit:]:
+def _build_thread_preview(comms: list[Any]) -> list[dict[str, Any]]:
+    preview: list[dict[str, Any]] = []
+    for entry in comms:
         if not isinstance(entry, dict):
             continue
         msg_type = str(entry.get("message_type") or entry.get("messageType") or "MSG")
         round_num = entry.get("round")
+        payload = entry.get("payload")
+        if not isinstance(payload, dict):
+            payload = {}
         preview.append(
             {
                 "who": "them" if entry.get("from_agent") == "vendor_agent" else "us",
                 "what": msg_type,
                 "meta": f"round {round_num}" if round_num is not None else "",
+                "type": msg_type,
+                "round": round_num,
+                "ts": entry.get("ts"),
+                "payload": payload,
             }
         )
     return preview

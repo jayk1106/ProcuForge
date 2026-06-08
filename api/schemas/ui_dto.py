@@ -105,7 +105,7 @@ class ActiveVendorDTO(BaseModel):
     moq: int = 1
     lead: str = "—"
     escalated: bool = False
-    thread: list[dict[str, str]] = Field(default_factory=list)
+    thread: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ActivityItemDTO(BaseModel):
