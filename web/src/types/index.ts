@@ -42,6 +42,8 @@ export interface ActiveVendor {
   status: 'NEGOTIATING' | 'WON' | 'LOST' | 'WALKED_AWAY'
   latest: number | null
   delta: number | null
+  target?: number | null
+  budget?: number | null
   moq: number
   lead: string
   escalated?: boolean

@@ -102,6 +102,8 @@ class ActiveVendorDTO(BaseModel):
     status: Literal["NEGOTIATING", "WON", "LOST", "WALKED_AWAY"]
     latest: float | None = None
     delta: float | None = None
+    target: float | None = None
+    budget: float | None = None
     moq: int = 1
     lead: str = "—"
     escalated: bool = False

@@ -54,6 +54,10 @@ export function NegotiationBoard({
           <div className="neg-summary">
             <div className="k">round</div>
             <div className="v">{v.round}</div>
+            <div className="k">target</div>
+            <div className="v">{v.target != null ? fmtMoney(v.target) : '—'}</div>
+            <div className="k">budget per unit</div>
+            <div className="v">{v.budget != null ? fmtMoney(v.budget) : '—'}</div>
             <div className="k">latest offer</div>
             <div className="v">{v.latest != null ? fmtMoney(v.latest) : '—'}</div>
             <div className="k">vs target</div>
@@ -61,6 +65,20 @@ export function NegotiationBoard({
               className={`v ${v.delta != null && v.delta > 0 ? 'delta-up' : v.delta != null && v.delta < 0 ? 'delta-down' : ''}`}
             >
               {fmtDelta(v.delta)}
+            </div>
+            <div className="k">vs budget</div>
+            <div
+              className={`v ${
+                v.latest != null && v.budget != null && v.latest - v.budget > 0
+                  ? 'delta-up'
+                  : v.latest != null && v.budget != null && v.latest - v.budget < 0
+                    ? 'delta-down'
+                    : ''
+              }`}
+            >
+              {v.latest != null && v.budget != null
+                ? fmtDelta(Math.round((v.latest - v.budget) * 100) / 100)
+                : '—'}
             </div>
             <div className="k">lead time</div>
             <div className="v">{v.lead}</div>

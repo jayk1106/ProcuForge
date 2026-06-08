@@ -286,7 +286,16 @@ def workflow_detail_from_state(
             comms = cfg.get("communications")
             comms_list = comms if isinstance(comms, list) else []
             latest = _latest_price_from_communications(comms_list)
-            delta = (latest - target) if latest is not None and target else None
+            # Compare against the per-unit target_price the negotiator computed
+            # for this vendor (catalog-aware, budget-capped), not the workflow's
+            # total budget_ceiling — those have different units.
+            vendor_target = _coerce_float(cfg.get("target_price"))
+            vendor_budget = _coerce_float(cfg.get("budget_per_unit"))
+            delta = (
+                round(latest - vendor_target, 2)
+                if latest is not None and vendor_target is not None
+                else None
+            )
             round_val = cfg.get("round")
             rfq_id = str(cfg.get("rfq_id") or "")
             thread_status = infer_vendor_thread_status(
@@ -312,6 +321,8 @@ def workflow_detail_from_state(
                     status=to_active_vendor_status(thread_status),
                     latest=latest,
                     delta=delta,
+                    target=vendor_target,
+                    budget=vendor_budget,
                     moq=int(moq) if isinstance(moq, (int, float)) else 1,
                     lead=f"{lead_days}d" if lead_days is not None else "—",
                     escalated=thread_status.name == "ESCALATED",

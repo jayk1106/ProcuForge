@@ -402,11 +402,6 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
                   num="3.0"
                   defaultOpen
                   status={<StatusPill kind={negPill.kind}>{negPill.text}</StatusPill>}
-                  right={
-                    flow.target > 0 ? (
-                      <span className="t-xs muted">target {fmtMoney(flow.target)}</span>
-                    ) : undefined
-                  }
                 >
                   {flow.vendors.length > 0 ? (
                     <NegotiationBoard

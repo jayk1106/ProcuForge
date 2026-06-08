@@ -181,14 +181,17 @@ def _decide_next_move(
     Rule order (first match wins — order is load-bearing):
 
     1. last vendor msg is WALKAWAY -> mirror with WALKAWAY(VENDOR_REJECTED)
-    2. last vendor msg is ACCEPT -> ACCEPT at vendor_price
+    2. last vendor msg is ACCEPT -> ACCEPT if within budget; else WALKAWAY(PRICE_GAP_TOO_LARGE)
     3. currency mismatch vs request -> WALKAWAY(PRICE_GAP_TOO_LARGE)
     4. response_deadline parseable and past -> WALKAWAY(QUOTE_EXPIRED)
-    5. vendor is_final=True -> ACCEPT if vendor_price <= budget_per_unit else WALKAWAY(MAX_ROUNDS_REACHED)
-    6. round >= _MAX_NEGOTIATION_ROUNDS -> WALKAWAY(MAX_ROUNDS_REACHED)
+    5. vendor is_final=True -> ACCEPT if within budget; else WALKAWAY(PRICE_GAP_TOO_LARGE)
+    6. round >= _MAX_NEGOTIATION_ROUNDS -> WALKAWAY(MAX_ROUNDS_REACHED) (only when vendor isn't final)
     7. round == 0 AND vendor_price > target -> COUNTER (force first counter even on generous budgets)
-    8. vendor_price within ACCEPT band of target -> ACCEPT (catches both round-0 below-target and later rounds)
-    9. else COUNTER, floored so we don't push the vendor below their plausible floor
+    8. vendor_price within ACCEPT band of target AND within budget -> ACCEPT
+    9. else COUNTER, floored at counter_floor and capped at budget_per_unit
+
+    Invariant after these rules: the buyer never sends ACCEPT or COUNTER above
+    budget_per_unit (when one is configured).
     """
     vendor_id = vendor_state["vendor_id"]
     comms = vendor_state.get("communications") or []
@@ -236,12 +239,22 @@ def _decide_next_move(
         return out
 
     # 2. Vendor accepted (rare — vendor usually accepts only after buyer COUNTER).
+    # Mirror only when within budget; otherwise walk away rather than auto-confirm
+    # an above-budget deal the vendor unilaterally locked in.
     if last_type == MessageType.ACCEPT.value and vendor_price is not None:
+        if budget_per_unit is None or vendor_price <= budget_per_unit:
+            return {
+                "vendor_id": vendor_id,
+                "message_type": MessageType.ACCEPT.value,
+                "price": vendor_price,
+                "reason": "vendor_accepted",
+            }
         return {
             "vendor_id": vendor_id,
-            "message_type": MessageType.ACCEPT.value,
+            "message_type": MessageType.WALKAWAY.value,
+            "walkaway_reason": "PRICE_GAP_TOO_LARGE",
             "price": vendor_price,
-            "reason": "vendor_accepted",
+            "reason": "vendor_accepted_above_budget",
         }
 
     # 3. Currency drift — vendor switched away from the request currency.
@@ -264,21 +277,23 @@ def _decide_next_move(
             "reason": "response_deadline_past",
         }
 
-    # 5. Vendor declared best-and-final.
+    # 5. Vendor declared best-and-final. ACCEPT if within budget; otherwise
+    # WALKAWAY — the vendor has signalled they won't move, so further counters
+    # are wasted rounds.
     if is_final and vendor_price is not None:
-        if budget_per_unit is not None and vendor_price > budget_per_unit:
+        if budget_per_unit is None or vendor_price <= budget_per_unit:
             return {
                 "vendor_id": vendor_id,
-                "message_type": MessageType.WALKAWAY.value,
-                "walkaway_reason": "MAX_ROUNDS_REACHED",
+                "message_type": MessageType.ACCEPT.value,
                 "price": vendor_price,
-                "reason": "is_final_above_budget",
+                "reason": "is_final_within_budget",
             }
         return {
             "vendor_id": vendor_id,
-            "message_type": MessageType.ACCEPT.value,
+            "message_type": MessageType.WALKAWAY.value,
+            "walkaway_reason": "PRICE_GAP_TOO_LARGE",
             "price": vendor_price,
-            "reason": "is_final_within_budget",
+            "reason": "is_final_above_budget",
         }
 
     # 6. Rounds exhausted.
@@ -325,8 +340,12 @@ def _decide_next_move(
         }
 
     # 8. Close enough after at least one round of negotiation — accept the
-    # vendor's best offer rather than risk a walkaway over pennies.
-    if vendor_price <= target_price * _ACCEPT_BAND_PCT:
+    # vendor's best offer rather than risk a walkaway over pennies. Band-accept
+    # is gated on budget: the band can mathematically exceed budget_per_unit
+    # when target ≈ budget, so re-check explicitly.
+    within_band = vendor_price <= target_price * _ACCEPT_BAND_PCT
+    within_budget = budget_per_unit is None or vendor_price <= budget_per_unit
+    if within_band and within_budget:
         return {
             "vendor_id": vendor_id,
             "message_type": MessageType.ACCEPT.value,
@@ -335,9 +354,12 @@ def _decide_next_move(
         }
 
     # 9. Standard counter — tighten toward target without pushing below the
-    # vendor's plausible floor.
+    # vendor's plausible floor, and never above the budget cap (a vendor ACCEPT
+    # of an above-budget counter would silently blow the budget).
     counter = max(target_price, round(vendor_price * _VENDOR_COUNTER_SHAVE, 2), counter_floor)
     counter = round(min(counter, vendor_price), 2)
+    if budget_per_unit is not None and counter > budget_per_unit:
+        counter = round(budget_per_unit, 2)
     return {
         "vendor_id": vendor_id,
         "message_type": MessageType.COUNTER_OFFER.value,
@@ -501,6 +523,48 @@ def _init_vendor_config(state: dict[str, Any], vendor_id: str) -> dict[str, Any]
     }
 
 
+# ── broadcast helpers ─────────────────────────────────────────────────────────
+
+def _broadcast_buyer_state(workflow_id: str, *, reason: str) -> None:
+    """Push the latest workflow DTO to the flow channel. Fire-and-forget."""
+    try:
+        from api.services.workflow_query import build_workflow_detail
+        from api.ws import broadcast_state
+
+        broadcast_state(
+            workflow_id,
+            lambda wid=workflow_id: build_workflow_detail(wid),
+            reason=reason,
+            workflow_id=workflow_id,
+        )
+    except Exception:
+        _LOG.exception(
+            "negotiator.tools.broadcast_buyer_failed workflow_id=%s reason=%s",
+            workflow_id,
+            reason,
+        )
+
+
+def _broadcast_vendor_thread(workflow_id: str, rfq_id: str) -> None:
+    """Push the latest vendor-thread DTO to the vt:{rfq_id} channel. Fire-and-forget."""
+    try:
+        from api.services.vendor_thread_query import build_vendor_convo
+        from api.ws import broadcast_state, vendor_thread_channel
+
+        broadcast_state(
+            vendor_thread_channel(rfq_id),
+            lambda rid=rfq_id: build_vendor_convo(rid),
+            reason="negotiation_reply",
+            workflow_id=workflow_id,
+            vendor_thread_id=rfq_id,
+        )
+    except Exception:
+        _LOG.exception(
+            "negotiator.tools.broadcast_vendor_thread_failed rfq_id=%s",
+            rfq_id,
+        )
+
+
 # ── tool ──────────────────────────────────────────────────────────────────────
 
 async def negotiate_with_vendor(
@@ -607,6 +671,12 @@ async def negotiate_with_vendor(
 
     _log_before_vendor_call(config, message_type, round, communication_payload)
     config["communications"].append(communication_payload)
+    config["round"] = round
+    # Early write-back so the outbound broadcast (next) reads the buyer state
+    # with the new message already attached. Without this, the broadcast factory
+    # would build a DTO from a session snapshot that's missing the outbound.
+    nego[vendor_id] = config
+    state[NEGOTIATION_CONFIG_KEY] = nego
 
     publish_vendor_message(
         workflow_id=tool_context.session.id,
@@ -618,12 +688,17 @@ async def negotiate_with_vendor(
         payload=communication_payload,
     )
 
+    # Outbound broadcast: push the buyer's message to the flow channel right
+    # away so the negotiation card shows progress instead of going silent for
+    # the duration of the A2A round-trip. Workflow channel only — the vendor's
+    # session (which feeds vt:{rfq_id}) doesn't have this message yet.
+    _broadcast_buyer_state(tool_context.session.id, reason="negotiation_outbound")
+
     reply = await _call_vendor(
         message_json=json.dumps(communication_payload),
         rfq_id=config["rfq_id"],
     )
 
-    config["round"] = round
     parsed_reply: Any = None
     try:
         parsed_reply = json.loads(reply)
@@ -633,7 +708,7 @@ async def negotiate_with_vendor(
     if message_type in (MessageType.ACCEPT, MessageType.WALKAWAY):
         config["done"] = True
     nego[vendor_id] = config
-    state[NEGOTIATION_CONFIG_KEY] = nego  # write-back so ADK persists updated round + comms
+    state[NEGOTIATION_CONFIG_KEY] = nego  # final write-back including vendor reply
 
     inbound_payload = parsed_reply if isinstance(parsed_reply, dict) else {"text": reply}
     publish_vendor_message(
@@ -646,25 +721,10 @@ async def negotiate_with_vendor(
         payload=inbound_payload,
     )
 
-    try:
-        from api.services.vendor_thread_query import build_vendor_convo
-        from api.ws import broadcast_state, vendor_thread_channel
-
-        _rfq_id_str = str(config["rfq_id"])
-        _wf_id = tool_context.session.id
-        broadcast_state(
-            vendor_thread_channel(_rfq_id_str),
-            lambda rid=_rfq_id_str: build_vendor_convo(rid),
-            reason="negotiation_reply",
-            workflow_id=_wf_id,
-            vendor_thread_id=_rfq_id_str,
-        )
-    except Exception:
-        _LOG.exception(
-            "negotiator.tools.broadcast_failed rfq_id=%s vendor_id=%s",
-            config.get("rfq_id"),
-            vendor_id,
-        )
+    # Inbound broadcast: workflow channel (buyer state now has vendor reply)
+    # + vendor_thread channel (vendor session now has the full round).
+    _broadcast_buyer_state(tool_context.session.id, reason="negotiation_reply")
+    _broadcast_vendor_thread(tool_context.session.id, str(config["rfq_id"]))
 
     _log_after_vendor_call(config, round, reply)
 
