@@ -205,6 +205,43 @@ async def _assemble_workflow_detail(
     )
 
 
+async def build_workflow_detail_from_state(
+    workflow_id: str,
+    state: dict,
+) -> WorkflowDetailDTO | None:
+    """Build a WorkflowDetailDTO from a caller-supplied state snapshot.
+
+    Used by mid-tool broadcasts: writes to ``tool_context.state`` are not
+    visible to a separate ``VertexAiSessionService`` read until ADK persists
+    the state delta at end-of-turn. Reading the session mid-tool would
+    produce a stale DTO that dedupe drops as a duplicate hash. Passing the
+    in-memory state directly bypasses that race.
+    """
+    from api.ws.context import get_ws_context
+
+    ctx = get_ws_context()
+    if ctx is None:
+        logger.debug(
+            "workflow_query.build_workflow_detail_from_state.no_ws_context workflow_id=%s",
+            workflow_id,
+        )
+        return None
+
+    try:
+        return await _assemble_workflow_detail(
+            workflow_id,
+            state,
+            vendor_repo=ctx.vendor_repo,
+            events_repo=ctx.events_repo,
+        )
+    except Exception:
+        logger.exception(
+            "workflow_query.build_workflow_detail_from_state.assemble_failed workflow_id=%s",
+            workflow_id,
+        )
+        return None
+
+
 async def build_workflow_detail(workflow_id: str) -> WorkflowDetailDTO | None:
     """Module-level factory for WS state-changed broadcasts.
 

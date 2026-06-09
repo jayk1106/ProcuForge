@@ -525,17 +525,47 @@ def _init_vendor_config(state: dict[str, Any], vendor_id: str) -> dict[str, Any]
 
 # ── broadcast helpers ─────────────────────────────────────────────────────────
 
-def _broadcast_buyer_state(workflow_id: str, *, reason: str) -> None:
-    """Push the latest workflow DTO to the flow channel. Fire-and-forget."""
+def _broadcast_buyer_state(
+    workflow_id: str,
+    *,
+    reason: str,
+    state_snapshot: dict[str, Any] | None = None,
+    immediate: bool = False,
+) -> None:
+    """Push the latest workflow DTO to the flow channel. Fire-and-forget.
+
+    Pass ``state_snapshot`` for mid-tool broadcasts: the in-memory
+    ``tool_context.state`` is not yet persisted to Vertex, so reading from
+    the session would return stale data. The snapshot is deep-copied here
+    so later mutations in the negotiator don't bleed into the factory
+    closure. ``immediate=True`` bypasses the WS debounce so this frame is
+    sent distinct from the next broadcast on the same channel.
+    """
     try:
-        from api.services.workflow_query import build_workflow_detail
         from api.ws import broadcast_state
+
+        if state_snapshot is not None:
+            import copy
+
+            from api.services.workflow_query import build_workflow_detail_from_state
+
+            frozen = copy.deepcopy(state_snapshot)
+            factory = (
+                lambda wid=workflow_id, snap=frozen: build_workflow_detail_from_state(
+                    wid, snap
+                )
+            )
+        else:
+            from api.services.workflow_query import build_workflow_detail
+
+            factory = lambda wid=workflow_id: build_workflow_detail(wid)  # noqa: E731
 
         broadcast_state(
             workflow_id,
-            lambda wid=workflow_id: build_workflow_detail(wid),
+            factory,
             reason=reason,
             workflow_id=workflow_id,
+            immediate=immediate,
         )
     except Exception:
         _LOG.exception(
@@ -692,7 +722,17 @@ async def negotiate_with_vendor(
     # away so the negotiation card shows progress instead of going silent for
     # the duration of the A2A round-trip. Workflow channel only — the vendor's
     # session (which feeds vt:{rfq_id}) doesn't have this message yet.
-    _broadcast_buyer_state(tool_context.session.id, reason="negotiation_outbound")
+    # ``immediate=True`` flushes past the 100ms debounce so the inbound
+    # broadcast (after _call_vendor returns) doesn't merge into the same
+    # frame. The state snapshot is required: tool_context.state writes are
+    # not yet persisted to Vertex, so the session-read factory would build a
+    # stale DTO and dedupe would drop the frame as a duplicate.
+    _broadcast_buyer_state(
+        tool_context.session.id,
+        reason="negotiation_outbound",
+        state_snapshot=state.to_dict() if hasattr(state, "to_dict") else dict(state),
+        immediate=True,
+    )
 
     reply = await _call_vendor(
         message_json=json.dumps(communication_payload),
@@ -722,8 +762,14 @@ async def negotiate_with_vendor(
     )
 
     # Inbound broadcast: workflow channel (buyer state now has vendor reply)
-    # + vendor_thread channel (vendor session now has the full round).
-    _broadcast_buyer_state(tool_context.session.id, reason="negotiation_reply")
+    # + vendor_thread channel (vendor session now has the full round). Pass
+    # the in-memory snapshot here too — Vertex still hasn't seen the writes
+    # until ADK persists the state delta at end-of-turn.
+    _broadcast_buyer_state(
+        tool_context.session.id,
+        reason="negotiation_reply",
+        state_snapshot=state.to_dict() if hasattr(state, "to_dict") else dict(state),
+    )
     _broadcast_vendor_thread(tool_context.session.id, str(config["rfq_id"]))
 
     _log_after_vendor_call(config, round, reply)

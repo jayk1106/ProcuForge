@@ -212,6 +212,16 @@ def phase_status_map(status: PrStatus) -> dict[PhaseId, PhaseStatus]:
         result["po"] = "walked"
         return result
 
+    # Negotiation rounds are over and the workflow is moving toward PO. Mark
+    # neg as done so the timeline/section pill reflects completion instead of
+    # sitting at "in progress" until PO_ISSUED lands.
+    if status in {PrStatus.NEGOTIATION_COMPLETED, PrStatus.VENDOR_SELECTED}:
+        result = {p: "pending" for p in PHASE_ORDER}
+        result["rfq"] = "done"
+        result["neg"] = "done"
+        result["po"] = "in_progress"
+        return result
+
     current = pr_status_to_phase_id(status)
     if status == PrStatus.CANCELLED:
         result = {}

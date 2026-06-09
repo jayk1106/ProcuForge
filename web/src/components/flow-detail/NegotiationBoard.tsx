@@ -113,8 +113,7 @@ export function NegotiationBoard({
               </div>
             ))}
           </div>
-          {(v.escalated && onResolveEscalation) ||
-          (v.status === 'NEGOTIATING' && !v.escalated) ? (
+          {v.escalated && onResolveEscalation && (
             <div
               style={{
                 padding: '10px 14px',
@@ -123,20 +122,15 @@ export function NegotiationBoard({
                 gap: 6,
               }}
             >
-              {v.status === 'NEGOTIATING' && !v.escalated && (
-                <button className="btn tiny">[ accept ]</button>
-              )}
-              {v.escalated && onResolveEscalation && (
-                <button
-                  className="btn tiny accent"
-                  disabled={resolvingEscalation}
-                  onClick={onResolveEscalation}
-                >
-                  [ {resolvingEscalation ? 'resolving…' : 'resolve escalation'} ]
-                </button>
-              )}
+              <button
+                className="btn tiny accent"
+                disabled={resolvingEscalation}
+                onClick={onResolveEscalation}
+              >
+                [ {resolvingEscalation ? 'resolving…' : 'resolve escalation'} ]
+              </button>
             </div>
-          ) : null}
+          )}
         </article>
       ))}
       {selectedStep && (

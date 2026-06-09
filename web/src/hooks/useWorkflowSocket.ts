@@ -131,6 +131,7 @@ export function useWorkflowSocket<T>(
 
         const env = parsed as ServerEnvelope<T>
         if (env.event_type !== 'state_changed') {
+          console.log('Event Data', env.data)
           wsLog(debugLabel, 'dedupe-drop reason=unknown_event_type', {
             type: env.event_type,
           })

@@ -215,6 +215,7 @@ class ConnectionManager:
         reason: str,
         workflow_id: str | None = None,
         vendor_thread_id: str | None = None,
+        immediate: bool = False,
     ) -> None:
         """Schedule a ``state_changed`` broadcast on the given channel.
 
@@ -227,6 +228,11 @@ class ConnectionManager:
 
         ``workflow_id`` / ``vendor_thread_id`` are echoed on the envelope so
         clients can identify which channel a frame belongs to.
+
+        Pass ``immediate=True`` to bypass debounce and flush right away — the
+        caller is asserting this update must reach subscribers as a distinct
+        frame (e.g. an outbound A2A message sent before an awaited reply
+        that would otherwise merge into the same debounce window).
         """
         loop = self._loop
         if loop is None:
@@ -247,6 +253,7 @@ class ConnectionManager:
             reason=reason,
             workflow_id=workflow_id,
             vendor_thread_id=vendor_thread_id,
+            immediate=immediate,
         )
         try:
             if running is loop:
@@ -268,6 +275,7 @@ class ConnectionManager:
         reason: str,
         workflow_id: str | None,
         vendor_thread_id: str | None,
+        immediate: bool = False,
     ) -> None:
         async with self._lock:
             has_subscribers = bool(self._connections.get(channel))
@@ -276,6 +284,28 @@ class ConnectionManager:
             logger.debug(
                 "ws.broadcast.skipped channel=%s reason=no_subscribers",
                 channel,
+            )
+            return
+
+        if immediate:
+            # Cancel any in-flight debounce timer for this channel and flush
+            # the new factory now. A pending merged factory (if any) is
+            # superseded by the new one — callers asking for immediate are
+            # asserting this snapshot is the one to send.
+            timer = self._pending_timer.pop(channel, None)
+            if timer is not None:
+                timer.cancel()
+            self._pending_factory[channel] = factory
+            self._pending_reason[channel] = reason
+            logger.debug(
+                "ws.broadcast.scheduled channel=%s reason=%s state=immediate",
+                channel,
+                reason,
+            )
+            await self._do_build_and_send(
+                channel,
+                workflow_id=workflow_id,
+                vendor_thread_id=vendor_thread_id,
             )
             return
 
