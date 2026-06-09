@@ -30,7 +30,7 @@ from ...state_keys import (
     PURCHASE_STEP_SNAPSHOT_KEY,
 )
 from .tools import (
-    _purchase_made_progress,
+    purchase_made_progress,
     maybe_apply_approval_gate,
     purchase_progress_snapshot,
     resolve_next_purchase_step,
@@ -154,7 +154,7 @@ def purchase_manager_after_agent(callback_context: CallbackContext) -> None:
 
     snapshot = state.get(PURCHASE_STEP_SNAPSHOT_KEY) or {}
     current_snap = purchase_progress_snapshot(state)
-    progress = _purchase_made_progress(snapshot, current_snap)
+    progress = purchase_made_progress(snapshot, current_snap)
     status_synced = sync_purchase_pr_status_from_acks(state)
     if status_synced:
         progress = True

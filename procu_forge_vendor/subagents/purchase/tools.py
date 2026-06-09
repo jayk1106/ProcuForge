@@ -64,8 +64,7 @@ def submit_invoice(tool_context: ToolContext) -> dict[str, Any]:
     if not po_line_index:
         return {"ok": False, "error": "PO has no line_items — cannot price invoice"}
 
-    rfq_id = tool_context.state.get(RFQ_ID_KEY) or "unknown"
-    invoice_number = f"INV-{rfq_id}-{uuid.uuid4().hex[:8].upper()}"
+    invoice_number = f"INV-{uuid.uuid4().hex[:8].upper()}"
     today = date.today()
     invoice_date = today.isoformat()
     due_date = (today + timedelta(days=30)).isoformat()

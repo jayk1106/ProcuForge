@@ -780,6 +780,11 @@ a { color: inherit; text-decoration: none; }
   background: var(--bg);
   margin-top: 14px;
 }
+/* Offset scrollIntoView landings so the sticky 56px topnav doesn't
+   overlap section headers when jumping via sidebar / auto-scroll. */
+.flow-layout main > div[id^="sec-"] {
+  scroll-margin-top: 72px;
+}
 .sec > header {
   display: flex;
   align-items: center;

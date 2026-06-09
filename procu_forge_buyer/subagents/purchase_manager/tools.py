@@ -20,7 +20,6 @@ from google.adk.tools.base_tool import ToolContext
 
 from communication import A2AMessageBuilder
 from procu_forge_buyer.a2a_client import call_vendor
-from procu_forge_buyer.pr_status import PrStatus
 from procu_forge_buyer.escalation import maybe_escalate_full
 from procu_forge_buyer.pr_status_transitions import (
     transition_to_awaiting_completion_approval,
@@ -63,7 +62,7 @@ PO_STEP = "po"
 GRN_STEP = "grn"
 COMPLETION_STEP = "completion"
 
-_LOG = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 _PO_REJECT_ESCALATE_THRESHOLD = 2
 _INVOICE_CORRECTION_ESCALATE_THRESHOLD = 3
@@ -92,7 +91,7 @@ def _broadcast_vendor_thread(
             vendor_thread_id=rfq_id,
         )
     except Exception:
-        _LOG.exception(
+        logger.exception(
             "purchase_manager.broadcast_failed reason=%s rfq_id=%s",
             reason,
             config.get("rfq_id"),
@@ -107,30 +106,29 @@ class _StateReader(Protocol):
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
+def _as_dict(state: _StateReader, key: str) -> dict[str, Any]:
+    value = state.get(key)
+    return value if isinstance(value, dict) else {}
+
+
 def _selected_vendor_label(state: _StateReader) -> str:
-    selected = state.get(SELECTED_VENDOR_KEY)
-    if isinstance(selected, dict):
-        return str(selected.get("vendor") or "the selected vendor")
-    return "the selected vendor"
+    return str(_as_dict(state, SELECTED_VENDOR_KEY).get("vendor") or "the selected vendor")
 
 
 def _reason_for_step(step: str, state: _StateReader) -> str:
     if step == PO_STEP:
         vendor = _selected_vendor_label(state)
-        po = state.get(PO_KEY) if isinstance(state.get(PO_KEY), dict) else {}
-        amount = po.get("total_amount") if isinstance(po, dict) else None
+        amount = _as_dict(state, PO_KEY).get("total_amount")
         if amount:
             return f"Approval required before sending PO to {vendor} (total {amount})."
         return f"Approval required before sending PO to {vendor}."
     if step == GRN_STEP:
-        po = state.get(PO_KEY) if isinstance(state.get(PO_KEY), dict) else {}
-        po_number = po.get("po_number") if isinstance(po, dict) else None
+        po_number = _as_dict(state, PO_KEY).get("po_number")
         if po_number:
             return f"Approval required before sending GRN for PO {po_number}."
         return "Approval required before sending GRN to the vendor."
     if step == COMPLETION_STEP:
-        invoice = state.get(INVOICE_KEY) if isinstance(state.get(INVOICE_KEY), dict) else {}
-        invoice_number = invoice.get("invoice_number") if isinstance(invoice, dict) else None
+        invoice_number = _as_dict(state, INVOICE_KEY).get("invoice_number")
         if invoice_number:
             return (
                 f"Approval required before closing the procurement for invoice {invoice_number}."
@@ -183,7 +181,7 @@ def maybe_apply_approval_gate(state: Any, *, step: str) -> dict[str, Any] | None
         "requested_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
     _apply_gate_transition(state, step)
-    _LOG.info(
+    logger.info(
         "purchase_manager.tool_gate step=%s pr_status=%s",
         step,
         state.get(PR_STATUS_KEY),
@@ -224,12 +222,11 @@ def _extract_agreed_price(communications: list[Any]) -> float | None:
     return None
 
 
-def _get_vendor_config(state: _StateReader) -> tuple[str, dict[str, Any]] | str:
+def get_vendor_config(state: _StateReader) -> tuple[str, dict[str, Any]] | str:
     """Return (vendor_id, negotiation_config) or an error string."""
-    selected = state.get(SELECTED_VENDOR_KEY)
-    if not isinstance(selected, dict):
+    if not isinstance(state.get(SELECTED_VENDOR_KEY), dict):
         return "selected_vendor missing from state"
-    vendor_id = str(selected.get("vendor") or "").strip()
+    vendor_id = _selected_vendor_id(state)
     if not vendor_id:
         return "selected_vendor.vendor is empty"
 
@@ -262,10 +259,7 @@ def _purchase_ack_snapshot(state: _StateReader) -> dict[str, bool]:
 
 
 def _selected_vendor_id(state: _StateReader) -> str:
-    selected = state.get(SELECTED_VENDOR_KEY)
-    if isinstance(selected, dict):
-        return str(selected.get("vendor") or "").strip()
-    return ""
+    return str(_as_dict(state, SELECTED_VENDOR_KEY).get("vendor") or "").strip()
 
 
 def _losing_vendor_ids(state: _StateReader) -> list[str]:
@@ -302,7 +296,7 @@ def purchase_progress_snapshot(state: _StateReader) -> dict[str, Any]:
     }
 
 
-def _purchase_made_progress(before: dict[str, Any], after: dict[str, Any]) -> bool:
+def purchase_made_progress(before: dict[str, Any], after: dict[str, Any]) -> bool:
     if before.get("pr_status") != after.get("pr_status"):
         return True
     before_acks = before.get("acks") or {}
@@ -347,7 +341,7 @@ def _build_grn_envelope(
 
 def build_purchase_progress(state: _StateReader) -> dict[str, Any]:
     """Synchronous progress payload — used by the instruction provider and tests."""
-    result = _get_vendor_config(state)
+    result = get_vendor_config(state)
     rfq_id = None
     vendor_id = None
     if isinstance(result, tuple):
@@ -355,17 +349,15 @@ def build_purchase_progress(state: _StateReader) -> dict[str, Any]:
         rfq_id = config.get("rfq_id")
 
     acks = _purchase_ack_snapshot(state)
-    po = state.get(PO_KEY) if isinstance(state.get(PO_KEY), dict) else {}
-    grn = state.get(GRN_KEY) if isinstance(state.get(GRN_KEY), dict) else {}
-    invoice = state.get(INVOICE_KEY) if isinstance(state.get(INVOICE_KEY), dict) else {}
+    po = _as_dict(state, PO_KEY)
+    grn = _as_dict(state, GRN_KEY)
+    invoice = _as_dict(state, INVOICE_KEY)
     losing = _losing_vendor_ids(state)
     closed = _rfq_closed_losers(state)
 
     return {
         "pr_status": state.get(PR_STATUS_KEY),
-        "selected_vendor": (state.get(SELECTED_VENDOR_KEY) or {}).get("vendor")
-        if isinstance(state.get(SELECTED_VENDOR_KEY), dict)
-        else None,
+        "selected_vendor": _as_dict(state, SELECTED_VENDOR_KEY).get("vendor"),
         "rfq_id": rfq_id,
         "vendor_id": vendor_id,
         "rfq_closed": {
@@ -407,7 +399,7 @@ async def send_po(tool_context: ToolContext) -> dict[str, Any]:
     if gated is not None:
         return gated
 
-    result = _get_vendor_config(tool_context.state)
+    result = get_vendor_config(tool_context.state)
     if isinstance(result, str):
         return {"ok": False, "error": result}
     vendor_id, config = result
@@ -426,7 +418,7 @@ async def send_po(tool_context: ToolContext) -> dict[str, Any]:
     existing_po = tool_context.state.get(PO_KEY)
     if isinstance(existing_po, dict) and existing_po.get("po_number"):
         po_record = dict(existing_po)
-        _LOG.info(
+        logger.info(
             "purchase_manager send_po retry  vendor_id=%s po_number=%s",
             vendor_id,
             po_record.get("po_number"),
@@ -475,26 +467,26 @@ async def send_po(tool_context: ToolContext) -> dict[str, Any]:
     builder = _make_builder(config, vendor_id)
     envelope = _build_po_envelope(builder, po_record=po_record)
 
-    _LOG.info(
+    logger.info(
         "purchase_manager send_po  vendor_id=%s po_number=%s total_amount=%s",
         vendor_id,
         po_record["po_number"],
         po_record.get("total_amount"),
     )
 
-    _LOG.debug("purchase_manager send_po envelope %s", envelope)
+    logger.debug("purchase_manager send_po envelope %s", envelope)
 
     try:
         reply = await call_vendor(json.dumps(envelope), config["rfq_id"])
     except Exception as exc:
-        _LOG.exception(
+        logger.exception(
             "purchase_manager send_po a2a_failed  vendor_id=%s rfq_id=%s",
             vendor_id,
             config["rfq_id"],
         )
         return {"ok": False, "error": f"vendor A2A call failed: {exc}"}
 
-    _LOG.debug("purchase_manager send_po reply_chars=%d", len(reply or ""))
+    logger.debug("purchase_manager send_po reply_chars=%d", len(reply or ""))
 
     ack_env = parse_vendor_envelope(reply)
     if ack_env is None:
@@ -547,7 +539,7 @@ async def send_grn_created(tool_context: ToolContext) -> dict[str, Any]:
     if gated is not None:
         return gated
 
-    result = _get_vendor_config(tool_context.state)
+    result = get_vendor_config(tool_context.state)
     if isinstance(result, str):
         return {"ok": False, "error": result}
     vendor_id, config = result
@@ -571,7 +563,7 @@ async def send_grn_created(tool_context: ToolContext) -> dict[str, Any]:
     existing_grn = tool_context.state.get(GRN_KEY)
     if isinstance(existing_grn, dict) and existing_grn.get("grn_number"):
         grn_record = dict(existing_grn)
-        _LOG.info(
+        logger.info(
             "purchase_manager send_grn retry  vendor_id=%s grn_number=%s po_number=%s",
             vendor_id,
             grn_record.get("grn_number"),
@@ -593,25 +585,25 @@ async def send_grn_created(tool_context: ToolContext) -> dict[str, Any]:
     builder = _make_builder(config, vendor_id)
     envelope = _build_grn_envelope(builder, grn_record=grn_record)
 
-    _LOG.info(
+    logger.info(
         "purchase_manager send_grn  vendor_id=%s grn_number=%s po_number=%s",
         vendor_id,
         grn_record["grn_number"],
         po_number,
     )
 
-    _LOG.debug("purchase_manager send_grn envelope %s", envelope)
+    logger.debug("purchase_manager send_grn envelope %s", envelope)
     try:
         reply = await call_vendor(json.dumps(envelope), config["rfq_id"])
     except Exception as exc:
-        _LOG.exception(
+        logger.exception(
             "purchase_manager send_grn a2a_failed  vendor_id=%s rfq_id=%s",
             vendor_id,
             config["rfq_id"],
         )
         return {"ok": False, "error": f"vendor A2A call failed: {exc}"}
 
-    _LOG.debug("purchase_manager send_grn reply_chars=%d", len(reply or ""))
+    logger.debug("purchase_manager send_grn reply_chars=%d", len(reply or ""))
     inv_env = parse_vendor_envelope(reply)
     if inv_env is None:
         return {
@@ -674,7 +666,7 @@ async def send_process_complete(tool_context: ToolContext) -> dict[str, Any]:
     if gated is not None:
         return gated
 
-    result = _get_vendor_config(tool_context.state)
+    result = get_vendor_config(tool_context.state)
     if isinstance(result, str):
         return {"ok": False, "error": result}
     vendor_id, config = result
@@ -683,12 +675,15 @@ async def send_process_complete(tool_context: ToolContext) -> dict[str, Any]:
         return {"ok": False, "error": "invoice not vendor-confirmed — send_grn_created must succeed first"}
 
     if tool_context.state.get(PROCESS_COMPLETE_VENDOR_ACK_KEY):
-        pc = dict(tool_context.state.get(PROCESS_COMPLETE_KEY) or {})
-        return {"ok": True, "note": "already_complete", "process_complete": pc}
+        return {
+            "ok": True,
+            "note": "already_complete",
+            "process_complete": _as_dict(tool_context.state, PROCESS_COMPLETE_KEY),
+        }
 
-    po_number = (tool_context.state.get(PO_KEY) or {}).get("po_number") or ""
-    grn_number = (tool_context.state.get(GRN_KEY) or {}).get("grn_number") or ""
-    invoice_number = (tool_context.state.get(INVOICE_KEY) or {}).get("invoice_number") or ""
+    po_number = _as_dict(tool_context.state, PO_KEY).get("po_number") or ""
+    grn_number = _as_dict(tool_context.state, GRN_KEY).get("grn_number") or ""
+    invoice_number = _as_dict(tool_context.state, INVOICE_KEY).get("invoice_number") or ""
 
     if not po_number:
         return {"ok": False, "error": "po_number missing — send_po must succeed first"}
@@ -704,7 +699,7 @@ async def send_process_complete(tool_context: ToolContext) -> dict[str, Any]:
         invoice_number=invoice_number,
     )
 
-    _LOG.info(
+    logger.info(
         "purchase_manager send_process_complete  vendor_id=%s po=%s grn=%s inv=%s",
         vendor_id,
         po_number,
@@ -715,7 +710,7 @@ async def send_process_complete(tool_context: ToolContext) -> dict[str, Any]:
     try:
         reply = await call_vendor(json.dumps(envelope), config["rfq_id"])
     except Exception as exc:
-        _LOG.exception(
+        logger.exception(
             "purchase_manager send_process_complete a2a_failed  vendor_id=%s rfq_id=%s",
             vendor_id,
             config["rfq_id"],
@@ -822,7 +817,7 @@ async def _notify_losing_vendors(state: Any) -> dict[str, Any]:
                 rfq_id,
             )
         except Exception as exc:  # noqa: BLE001
-            _LOG.warning(
+            logger.warning(
                 "purchase_manager rfq_closed_failed  vendor_id=%s error=%s",
                 vendor_id,
                 exc,
@@ -841,7 +836,7 @@ async def _notify_losing_vendors(state: Any) -> dict[str, Any]:
         closed_map[vendor_id] = True
         state[RFQ_CLOSED_LOSERS_KEY] = closed_map
         results[vendor_id] = {"ok": True, "reply": parsed}
-        _LOG.info(
+        logger.info(
             "purchase_manager rfq_closed_sent  vendor_id=%s rfq_id=%s",
             vendor_id,
             rfq_id,
@@ -870,14 +865,11 @@ async def _notify_losing_vendors(state: Any) -> dict[str, Any]:
 __all__ = [
     "build_purchase_progress",
     "purchase_progress_snapshot",
-    "_purchase_made_progress",
-    "_notify_losing_vendors",
+    "purchase_made_progress",
     "send_po",
     "send_grn_created",
     "send_process_complete",
-    "_get_vendor_config",
-    "_all_losing_vendors_notified",
-    "_purchase_ack_snapshot",
+    "get_vendor_config",
     "PO_STEP",
     "GRN_STEP",
     "COMPLETION_STEP",
