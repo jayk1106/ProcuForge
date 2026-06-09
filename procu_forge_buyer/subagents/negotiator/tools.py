@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from google.adk.tools.base_tool import ToolContext
 
-from communication import A2AMessageBuilder, MessageType
+from communication import MAX_NEGOTIATION_ROUNDS, A2AMessageBuilder, MessageType
 from procu_forge_buyer.a2a_client import call_vendor as _call_vendor
 from procu_forge_buyer.event_hooks import publish_vendor_message, record_vendor_thread_initiated
 from procu_forge_buyer.pr_status_transitions import _targeted_vendor_ids
@@ -28,8 +28,8 @@ _COUNTER_FLOOR_EXTRA_PCT = 5.0        # later counters floored at catalog * (1 -
 _ACCEPT_BAND_PCT = 1.03               # vendor_price <= target * 1.03 -> accept after round 0
 _VENDOR_COUNTER_SHAVE = 0.94          # default counter is vendor_price * 0.94
 # Hard cap on negotiation rounds. After this many buyer rounds, WALKAWAY(MAX_ROUNDS_REACHED).
-# Must stay in sync with vendor side (procu_forge_vendor/subagents/negotiation/tools.py:_MAX_ROUNDS).
-_MAX_NEGOTIATION_ROUNDS = 5
+# Shared with the vendor side via communication.MAX_NEGOTIATION_ROUNDS.
+_MAX_NEGOTIATION_ROUNDS = MAX_NEGOTIATION_ROUNDS
 
 
 # ── logging helpers ───────────────────────────────────────────────────────────
@@ -678,6 +678,8 @@ async def negotiate_with_vendor(
         round = int(round) + 1
 
     product = config.get("product") or {}
+    request_block = state.get(REQUEST_KEY) if isinstance(state.get(REQUEST_KEY), dict) else {}
+    buyer_org_id = str(_get(request_block, "organization_id", "organizationId") or "")
     builder = A2AMessageBuilder(
         rfq_id=config["rfq_id"],
         vendor_id=vendor_id,
@@ -686,6 +688,7 @@ async def negotiate_with_vendor(
         quantity=_to_quantity(product.get("quantity")),
         unit=str(product.get("unit") or ""),
         currency=str(product.get("currency") or ""),
+        buyer_org_id=buyer_org_id,
     )
 
     if message_type == MessageType.RFQ:

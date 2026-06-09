@@ -31,6 +31,11 @@
         "description": "Identifies which vendor's pricing/context the vendor agent should load.",
         "examples": ["vendor_123"]
       },
+      "buyer_org_id": {
+        "type": "string",
+        "description": "Optional. Identifies the buyer's organization so the vendor can look up vendorOrgRelations for relationship-aware pricing (average discount, relationship strength, preferred-vendor status). Missing or empty -> vendor treats buyer as new and uses defaults.",
+        "examples": ["org_acme"]
+      },
       "from_agent": {
         "type": "string",
         "enum": ["buyer_agent", "vendor_agent"]

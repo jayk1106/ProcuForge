@@ -17,11 +17,13 @@ from communication.schema import MessageType
 from .communication_status import VendorThreadStatus, get_status, set_status
 from .state_keys import (
     ACCEPTED_PRICE_KEY,
+    BUYER_ORG_ID_KEY,
     COMMUNICATION_KEY,
     GRN_KEY,
     LAST_SELLING_PRICE_KEY,
     LATEST_BUYER_PRICE_KEY,
     LATEST_OFFER_PRICE_KEY,
+    OPENING_PRICE_KEY,
     PO_KEY,
     PRODUCT_KEY,
     RFQ_ID_KEY,
@@ -31,6 +33,7 @@ from .state_keys import (
     STATUS_KEY,
     VENDOR_ID_KEY,
     VENDOR_IS_FINAL_KEY,
+    VENDOR_RELATION_KEY,
 )
 
 
@@ -101,6 +104,7 @@ def _initial_state_from_rfq(envelope: dict[str, Any]) -> dict[str, Any]:
     item: dict[str, Any] = payload.get("item") or {}
     return {
         VENDOR_ID_KEY: envelope.get("vendor_id", ""),
+        BUYER_ORG_ID_KEY: envelope.get("buyer_org_id", ""),
         RFQ_ID_KEY: envelope.get("rfq_id", ""),
         ROUND_KEY: 0,
         PRODUCT_KEY: {
@@ -113,6 +117,8 @@ def _initial_state_from_rfq(envelope: dict[str, Any]) -> dict[str, Any]:
         # Reset all per-thread keys so a recycled session starts clean.
         STATUS_KEY: None,
         LAST_SELLING_PRICE_KEY: None,
+        OPENING_PRICE_KEY: None,
+        VENDOR_RELATION_KEY: None,
         LATEST_OFFER_PRICE_KEY: None,
         LATEST_BUYER_PRICE_KEY: None,
         ACCEPTED_PRICE_KEY: None,
