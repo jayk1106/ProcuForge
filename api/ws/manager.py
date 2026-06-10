@@ -46,7 +46,13 @@ def vendor_thread_channel(rfq_id: str) -> str:
     return f"{VENDOR_THREAD_CHANNEL_PREFIX}{rfq_id}"
 
 
-StateFactory = Callable[[], Awaitable[BaseModel | dict[str, Any] | None]]
+# Factories may return either a raw DTO (legacy) or a ``(DTO, ProjectionPayload)``
+# tuple. Tuple results trigger a Firestore state mirror dispatched fire-and-forget
+# on the bound event loop; the DTO is broadcast to subscribers exactly as before.
+StateFactoryResult = (
+    BaseModel | dict[str, Any] | None | tuple[BaseModel | dict[str, Any], Any]
+)
+StateFactory = Callable[[], Awaitable[StateFactoryResult]]
 
 
 def _payload_hash(payload: dict[str, Any]) -> str:
@@ -277,15 +283,10 @@ class ConnectionManager:
         vendor_thread_id: str | None,
         immediate: bool = False,
     ) -> None:
-        async with self._lock:
-            has_subscribers = bool(self._connections.get(channel))
-
-        if not has_subscribers:
-            logger.debug(
-                "ws.broadcast.skipped channel=%s reason=no_subscribers",
-                channel,
-            )
-            return
+        # Don't bail when there are no subscribers — the factory still needs to
+        # run so the Firestore state projection fires on every mutation. The
+        # actual websocket send is gated on subscribers inside
+        # ``_do_build_and_send``.
 
         if immediate:
             # Cancel any in-flight debounce timer for this channel and flush
@@ -356,24 +357,34 @@ class ConnectionManager:
             if factory is None:
                 return
 
-            async with self._lock:
-                has_subscribers = bool(self._connections.get(channel))
-            if not has_subscribers:
-                logger.debug(
-                    "ws.broadcast.skipped channel=%s reason=no_subscribers_at_fire",
-                    channel,
-                )
-                return
-
+            # Build phase — always runs, regardless of subscriber presence, so
+            # the Firestore projection fires on every state mutation.
             t0 = time.perf_counter()
             try:
-                dto = await factory()
+                result = await factory()
             except Exception as exc:
                 logger.exception(
                     "ws.broadcast.dto_build_failed channel=%s reason=%s error=%s",
                     channel,
                     reason,
                     exc,
+                )
+                return
+
+            dto, projection_payload = _split_factory_result(result)
+
+            # Dispatch Firestore projection fire-and-forget; never block the
+            # send path on it.
+            if projection_payload is not None:
+                self._dispatch_projection(channel, projection_payload, reason)
+
+            # Send phase — gated on having at least one subscriber.
+            async with self._lock:
+                has_subscribers = bool(self._connections.get(channel))
+            if not has_subscribers:
+                logger.debug(
+                    "ws.broadcast.skipped channel=%s reason=no_subscribers_at_fire",
+                    channel,
                 )
                 return
 
@@ -432,6 +443,43 @@ class ConnectionManager:
                 build_ms,
                 reason,
             )
+
+    def _dispatch_projection(
+        self,
+        channel: str,
+        payload: Any,
+        reason: str,
+    ) -> None:
+        """Fire-and-forget Firestore state projection. Never raises."""
+        loop = self._loop
+        if loop is None:
+            return
+        # Lazy import to avoid a circular dependency at module load time.
+        from api.services.state_projection import _dispatch_projection
+
+        try:
+            loop.create_task(_dispatch_projection(payload))
+        except Exception:
+            logger.exception(
+                "ws.projection.schedule_failed channel=%s reason=%s",
+                channel,
+                reason,
+            )
+
+
+def _split_factory_result(
+    result: StateFactoryResult,
+) -> tuple[BaseModel | dict[str, Any] | None, Any | None]:
+    """Unpack a factory result into ``(dto, projection_payload)``.
+
+    Factories may return either the bare DTO (legacy) or a tuple of
+    ``(DTO, ProjectionPayload)``. The send path consumes the DTO; the
+    projection path consumes the payload.
+    """
+    if isinstance(result, tuple) and len(result) == 2:
+        dto, payload = result
+        return dto, payload
+    return result, None
 
 
 manager: Final[ConnectionManager] = ConnectionManager()

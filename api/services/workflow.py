@@ -17,9 +17,7 @@ from api.schemas.workflow import (
     WorkflowStartResponse,
 )
 from db.collections.product import Product
-from db.collections.workflow_index import WorkflowIndexEntry
 from db.firestore.repositories.products import ProductRepository
-from db.firestore.repositories.workflow_index import WorkflowIndexRepository
 from procu_forge_buyer.pr_status import PrStatus
 
 logger = logging.getLogger(__name__)
@@ -49,11 +47,9 @@ class WorkflowService:
         self,
         product_repo: ProductRepository,
         settings: APISettings,
-        index_repo: WorkflowIndexRepository | None = None,
     ) -> None:
         self._product_repo = product_repo
         self._settings = settings
-        self._index_repo = index_repo
 
     async def start(
         self, request: WorkflowStartRequest
@@ -80,7 +76,7 @@ class WorkflowService:
             requester_id=requester_id,
         )
 
-        await self._create_session(
+        initial_state = await self._create_session(
             workflow_id,
             user_id,
             buyer_request,
@@ -88,19 +84,13 @@ class WorkflowService:
             approval_required=request.approval_required,
         )
 
-        qty_label = f"{product.name} × {request.quantity}"
-        await self._write_index(
-            workflow_id=workflow_id,
-            request_id=buyer_request.request_id,
-            organization_id=organization_id,
-            product_id=product.id,
-            product_name=qty_label,
-            requester_id=requester_id,
-            pr_status=PrStatus.INITIATED.value,
-            started_at=started_at,
-            vendor_count=0,
-            needs_action=False,
-        )
+        # Seed the Firestore workflow_state row immediately from the initial
+        # state we just wrote, so the flows list reflects the new flow before
+        # the first agent state_delta. Direct projection avoids a Vertex
+        # eventual-consistency race that a broadcast-driven factory would hit.
+        from api.services.state_projection import project_workflow_state
+
+        await project_workflow_state(workflow_id, initial_state)
 
         response = WorkflowStartResponse(
             workflow_id=workflow_id,
@@ -322,14 +312,6 @@ class WorkflowService:
         )
 
         approved_at = datetime.now(timezone.utc)
-        if self._index_repo is not None:
-            await self._index_repo.update_fields(
-                workflow_id,
-                {
-                    "prStatus": resume_status,
-                    "needsAction": False,
-                },
-            )
 
         logger.info(
             "workflow.approve  workflow_id=%s step=%s status=%s->%s",
@@ -434,12 +416,6 @@ class WorkflowService:
             workflow_id=workflow_id,
         )
 
-        if self._index_repo is not None:
-            await self._index_repo.update_fields(
-                workflow_id,
-                {"prStatus": resume_status, "needsAction": False},
-            )
-
         response = WorkflowResolveEscalationResponse(
             workflow_id=workflow_id,
             resolved_at=resolved_at,
@@ -489,7 +465,7 @@ class WorkflowService:
         product: Product,
         *,
         approval_required: bool = False,
-    ) -> None:
+    ) -> dict:
         from google.adk.sessions import VertexAiSessionService
 
         session_service = VertexAiSessionService(
@@ -517,6 +493,7 @@ class WorkflowService:
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="Failed to initialise the agent session. Please retry.",
             ) from exc
+        return session_state
 
     def _ensure_vertex_configured(self) -> None:
         missing: list[str] = []
@@ -541,35 +518,3 @@ class WorkflowService:
             "to repeat them unless something is missing from state."
         )
 
-    async def _write_index(
-        self,
-        *,
-        workflow_id: str,
-        request_id: str,
-        organization_id: str,
-        product_id: str,
-        product_name: str,
-        requester_id: str,
-        pr_status: str,
-        started_at: datetime,
-        vendor_count: int,
-        needs_action: bool,
-    ) -> None:
-        if self._index_repo is None:
-            return
-        now = datetime.now(timezone.utc)
-        entry = WorkflowIndexEntry(
-            id=workflow_id,
-            workflowId=workflow_id,
-            requestId=request_id,
-            organizationId=organization_id,
-            productId=product_id,
-            productName=product_name,
-            requesterId=requester_id,
-            prStatus=pr_status,
-            startedAt=started_at,
-            updatedAt=now,
-            vendorCount=vendor_count,
-            needsAction=needs_action,
-        )
-        await self._index_repo.upsert(entry)

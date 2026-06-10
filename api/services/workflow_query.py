@@ -11,19 +11,17 @@ from api.config import APISettings
 from api.schemas.ui_dto import WorkflowDetailDTO, WorkflowRowDTO
 from api.services.session_reader import BuyerSessionReader
 from api.services.status_mapping import (
-    needs_action,
+    action_label,
     parse_pr_status,
     pr_status_human_label,
+    pr_status_to_phase_label,
 )
-from api.services.ui_mappers import workflow_detail_from_state, workflow_row_from_state
-from db.collections.workflow_index import WorkflowIndexEntry
+from api.services.ui_mappers import workflow_detail_from_state
 from db.firestore.repositories.vendors import VendorRepository
 from db.firestore.repositories.workflow_events import WorkflowEventsRepository
-from db.firestore.repositories.workflow_index import WorkflowIndexRepository
+from db.firestore.repositories.workflow_state import WorkflowStateRepository
 from procu_forge_buyer.state_keys import (
     NEGOTIATION_CONFIG_KEY,
-    PR_STATUS_KEY,
-    REQUEST_KEY,
     VENDOR_OFFERS_KEY,
 )
 
@@ -34,12 +32,12 @@ class WorkflowQueryService:
     def __init__(
         self,
         settings: APISettings,
-        index_repo: WorkflowIndexRepository,
+        state_repo: WorkflowStateRepository,
         vendor_repo: VendorRepository,
         events_repo: WorkflowEventsRepository,
     ) -> None:
         self._settings = settings
-        self._index_repo = index_repo
+        self._state_repo = state_repo
         self._vendor_repo = vendor_repo
         self._events_repo = events_repo
         self._buyer_reader = BuyerSessionReader(settings)
@@ -59,51 +57,47 @@ class WorkflowQueryService:
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="organization_id is required.",
             )
-        entries = await self._index_repo.list_by_org(org)
+        docs = await self._state_repo.list_by_org(org)
         now = datetime.now(timezone.utc)
         return [
             WorkflowRowDTO(
-                id=e.workflow_id,
-                requestId=e.request_id,
-                product=e.product_name,
-                requestedBy=e.requester_id,
-                requestedAt=e.started_at.date().isoformat(),
-                phase=_index_phase(e.pr_status),  # type: ignore[arg-type]
-                currentState=pr_status_human_label(parse_pr_status(e.pr_status)),
-                vendors=e.vendor_count,
+                id=d.workflow_id,
+                requestId=d.request_id,
+                product=d.product_name,
+                requestedBy=d.requester_id,
+                requestedAt=d.started_at.date().isoformat(),
+                phase=pr_status_to_phase_label(parse_pr_status(d.pr_status)),  # type: ignore[arg-type]
+                currentState=pr_status_human_label(parse_pr_status(d.pr_status)),
+                vendors=d.vendor_count,
                 days=max(
                     0,
                     (
                         now
                         - (
-                            e.started_at.replace(tzinfo=timezone.utc)
-                            if e.started_at.tzinfo is None
-                            else e.started_at
+                            d.started_at.replace(tzinfo=timezone.utc)
+                            if d.started_at.tzinfo is None
+                            else d.started_at
                         )
                     ).days,
                 ),
-                needsAction=e.needs_action,
-                actionLabel=_index_action_label(e.pr_status) if e.needs_action else None,
-                walked=e.pr_status in {"NO_VENDOR_AVAILABLE", "NO_VENDORS_DISCOVERED"},
+                needsAction=d.needs_action,
+                actionLabel=action_label(parse_pr_status(d.pr_status)) if d.needs_action else None,
+                walked=d.pr_status in {"NO_VENDOR_AVAILABLE", "NO_VENDORS_DISCOVERED"},
             )
-            for e in entries
+            for d in docs
         ]
 
     async def get_workflow(self, workflow_id: str) -> WorkflowDetailDTO:
         self._ensure_configured()
-        session = await self._buyer_reader.get_session(workflow_id)
-        if session is None:
+        doc = await self._state_repo.get(workflow_id)
+        if doc is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Workflow '{workflow_id}' not found.",
             )
-        state = session.state if isinstance(session.state, dict) else {}
-
-        await self._lazy_upsert_index(workflow_id, state)
-
         return await _assemble_workflow_detail(
             workflow_id,
-            state,
+            doc.state,
             vendor_repo=self._vendor_repo,
             events_repo=self._events_repo,
         )
@@ -115,58 +109,6 @@ class WorkflowQueryService:
         if session is None:
             return {}
         return session.state if isinstance(session.state, dict) else {}
-
-    async def _lazy_upsert_index(self, workflow_id: str, state: dict) -> None:
-        request = state.get(REQUEST_KEY) if isinstance(state.get(REQUEST_KEY), dict) else {}
-        product = state.get("product") if isinstance(state.get("product"), dict) else {}
-        pr_status = parse_pr_status(state.get(PR_STATUS_KEY))
-
-        vendor_count = 0
-        neg = state.get(NEGOTIATION_CONFIG_KEY)
-        if isinstance(neg, dict):
-            vendor_count = len(neg)
-        elif isinstance(state.get("vendor_offers"), dict):
-            offers = state["vendor_offers"].get("offers")
-            if isinstance(offers, list):
-                vendor_count = len(offers)
-
-        created_raw = request.get("created_at") or request.get("createdAt")
-        started_at = datetime.now(timezone.utc)
-        if created_raw:
-            try:
-                started_at = datetime.fromisoformat(str(created_raw).replace("Z", "+00:00"))
-            except ValueError:
-                pass
-
-        row = workflow_row_from_state(workflow_id, state, product_name=product.get("name"))
-        entry = WorkflowIndexEntry(
-            id=workflow_id,
-            workflowId=workflow_id,
-            requestId=str(request.get("request_id") or request.get("requestId") or workflow_id),
-            organizationId=str(request.get("organization_id") or request.get("organizationId") or ""),
-            productId=str(request.get("product_id") or request.get("productId") or ""),
-            productName=row.product,
-            requesterId=row.requested_by,
-            prStatus=pr_status.value,
-            startedAt=started_at,
-            updatedAt=datetime.now(timezone.utc),
-            vendorCount=vendor_count,
-            needsAction=needs_action(pr_status),
-        )
-        await self._index_repo.upsert(entry)
-
-
-def _index_phase(pr_status: str) -> str:
-    from api.services.status_mapping import pr_status_to_phase_label
-
-    return pr_status_to_phase_label(parse_pr_status(pr_status))
-
-
-def _index_action_label(pr_status: str) -> str | None:
-    from api.services.status_mapping import action_label
-
-    return action_label(parse_pr_status(pr_status))
-
 
 async def _assemble_workflow_detail(
     workflow_id: str,
@@ -208,7 +150,7 @@ async def _assemble_workflow_detail(
 async def build_workflow_detail_from_state(
     workflow_id: str,
     state: dict,
-) -> WorkflowDetailDTO | None:
+) -> tuple[WorkflowDetailDTO, "ProjectionPayload"] | None:
     """Build a WorkflowDetailDTO from a caller-supplied state snapshot.
 
     Used by mid-tool broadcasts: writes to ``tool_context.state`` are not
@@ -216,7 +158,11 @@ async def build_workflow_detail_from_state(
     the state delta at end-of-turn. Reading the session mid-tool would
     produce a stale DTO that dedupe drops as a duplicate hash. Passing the
     in-memory state directly bypasses that race.
+
+    Returns ``(dto, projection_payload)`` so the WS hook mirrors the state
+    to Firestore alongside the broadcast.
     """
+    from api.services.state_projection import ProjectionPayload
     from api.ws.context import get_ws_context
 
     ctx = get_ws_context()
@@ -228,7 +174,7 @@ async def build_workflow_detail_from_state(
         return None
 
     try:
-        return await _assemble_workflow_detail(
+        dto = await _assemble_workflow_detail(
             workflow_id,
             state,
             vendor_repo=ctx.vendor_repo,
@@ -241,15 +187,27 @@ async def build_workflow_detail_from_state(
         )
         return None
 
+    payload = ProjectionPayload(
+        kind="workflow",
+        state=state,
+        workflow_id=workflow_id,
+    )
+    return dto, payload
 
-async def build_workflow_detail(workflow_id: str) -> WorkflowDetailDTO | None:
+
+async def build_workflow_detail(
+    workflow_id: str,
+) -> tuple[WorkflowDetailDTO, "ProjectionPayload"] | None:
     """Module-level factory for WS state-changed broadcasts.
 
     Reads the WS context registry, fetches the buyer session, and assembles
-    the same DTO the REST handler returns. Returns ``None`` if the WS
-    context hasn't been initialized or the session is missing — the
-    connection manager treats ``None`` as "skip this broadcast".
+    the same DTO the REST handler returns. Returns ``(dto, payload)`` so the
+    WS hook mirrors the session state into ``workflow_state/{id}`` alongside
+    the broadcast. Returns ``None`` if the WS context hasn't been
+    initialized or the session is missing — the connection manager treats
+    ``None`` as "skip this broadcast".
     """
+    from api.services.state_projection import ProjectionPayload
     from api.ws.context import get_ws_context
 
     ctx = get_ws_context()
@@ -277,8 +235,11 @@ async def build_workflow_detail(workflow_id: str) -> WorkflowDetailDTO | None:
         return None
 
     state = session.state if isinstance(session.state, dict) else {}
+    events = getattr(session, "events", None)
+    state_version = len(events) if isinstance(events, list) else None
+
     try:
-        return await _assemble_workflow_detail(
+        dto = await _assemble_workflow_detail(
             workflow_id,
             state,
             vendor_repo=ctx.vendor_repo,
@@ -290,3 +251,11 @@ async def build_workflow_detail(workflow_id: str) -> WorkflowDetailDTO | None:
             workflow_id,
         )
         return None
+
+    payload = ProjectionPayload(
+        kind="workflow",
+        state=state,
+        workflow_id=workflow_id,
+        state_version=state_version,
+    )
+    return dto, payload

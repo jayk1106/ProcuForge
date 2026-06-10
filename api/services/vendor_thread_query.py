@@ -3,25 +3,30 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, status
+
+if TYPE_CHECKING:
+    from api.services.state_projection import ProjectionPayload
 
 from api.config import APISettings
 from api.schemas.ui_dto import VendorConvoDTO, VendorThreadRowDTO
 from api.schemas.vendor_thread_status import VendorThreadStatus
 from api.services.session_reader import BuyerSessionReader, VendorSessionReader
-from api.services.ui_mappers import vendor_convo_from_state, vendor_thread_rows_from_state
+from api.services.ui_mappers import vendor_convo_from_state
 from api.ws import broadcast_state, record_event, vendor_thread_channel
+from db.collections.vendor_thread_state import VendorThreadStateDoc
 from db.firestore.repositories.products import ProductRepository
 from db.firestore.repositories.rfq_index import RfqIndexRepository
+from db.firestore.repositories.vendor_thread_state import VendorThreadStateRepository
 from db.firestore.repositories.vendors import VendorRepository
 from db.firestore.repositories.workflow_events import WorkflowEventsRepository
-from db.firestore.repositories.workflow_index import WorkflowIndexRepository
 from procu_forge_buyer.state_keys import (
     ESCALATION_CONTEXT_KEY,
     ESCALATION_PENDING_NOTIFY_KEY,
-    NEGOTIATION_CONFIG_KEY,
     VENDOR_THREAD_OVERRIDES_KEY,
 )
 
@@ -33,14 +38,14 @@ class VendorThreadQueryService:
     def __init__(
         self,
         settings: APISettings,
-        index_repo: WorkflowIndexRepository,
+        thread_state_repo: VendorThreadStateRepository,
         vendor_repo: VendorRepository,
         rfq_index_repo: RfqIndexRepository,
         events_repo: WorkflowEventsRepository,
         product_repo: ProductRepository | None = None,
     ) -> None:
         self._settings = settings
-        self._index_repo = index_repo
+        self._thread_state_repo = thread_state_repo
         self._vendor_repo = vendor_repo
         self._rfq_index_repo = rfq_index_repo
         self._events_repo = events_repo
@@ -71,58 +76,47 @@ class VendorThreadQueryService:
                 detail="organization_id is required.",
             )
 
-        entries = await self._index_repo.list_by_org(org)
-        all_rows: list[VendorThreadRowDTO] = []
-
-        for entry in entries:
-            session = await self._buyer_reader.get_session(entry.workflow_id)
-            if session is None:
-                continue
-            state = session.state if isinstance(session.state, dict) else {}
-
-            vendor_ids: list[str] = []
-            neg = state.get(NEGOTIATION_CONFIG_KEY)
-            if isinstance(neg, dict):
-                for vid, cfg in neg.items():
-                    if isinstance(cfg, dict):
-                        vendor_ids.append(str(cfg.get("vendor_id") or vid))
-            vendor_names = await self._vendor_repo.get_many(vendor_ids)
-            all_rows.extend(
-                vendor_thread_rows_from_state(
-                    entry.workflow_id,
-                    state,
-                    vendor_names=vendor_names,
-                )
-            )
-
-        return all_rows
+        docs = await self._thread_state_repo.list_by_org(org)
+        # Names fall back to a per-org vendor lookup only for docs that were
+        # projected before ``vendorName`` was populated. Skipping when present
+        # avoids an extra Firestore read on the hot path.
+        missing_names = [d.vendor_id for d in docs if not d.vendor_name]
+        name_lookup = (
+            await self._vendor_repo.get_many(missing_names) if missing_names else {}
+        )
+        return [_row_from_thread_doc(d, name_lookup) for d in docs]
 
     async def get_thread(self, rfq_id: str) -> VendorConvoDTO:
         self._ensure_configured()
 
-        workflow_id, vendor_id = await self._resolve_rfq(rfq_id)
-        if not vendor_id:
+        doc = await self._thread_state_repo.get(rfq_id)
+        if doc is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Vendor thread '{rfq_id}' not found.",
             )
 
-        dto = await _assemble_vendor_convo(
+        # The detail page renders from the assembled DTO. Project from the
+        # stored vendor state plus the optional buyer override embedded in the
+        # doc; fall back to assembling from the live Vertex session if the
+        # stored state hasn't been written yet (transient race during first
+        # vendor turn).
+        assembled = await _assemble_vendor_convo(
             rfq_id,
-            workflow_id=workflow_id,
-            vendor_id=vendor_id,
+            workflow_id=doc.workflow_id,
+            vendor_id=doc.vendor_id,
             vendor_reader=self._vendor_reader,
             buyer_reader=self._buyer_reader,
             vendor_repo=self._vendor_repo,
             product_repo=self._product_repo,
             events_repo=self._events_repo,
         )
-        if dto is None:
+        if assembled is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Vendor session for rfq '{rfq_id}' not found.",
             )
-        return dto
+        return assembled.dto
 
     async def get_thread_state(self, rfq_id: str) -> dict:
         """Return raw vendor and buyer session state for debugging."""
@@ -279,42 +273,15 @@ class VendorThreadQueryService:
         }
 
     async def _resolve_rfq(self, rfq_id: str) -> tuple[str, str]:
-        """Find workflow_id and vendor_id for an rfq_id.
+        """Look up ``(workflow_id, vendor_id)`` for an ``rfq_id``.
 
-        Fast path: O(1) lookup against the rfq_index Firestore collection.
-        Fallback: linear scan of buyer sessions for rows not yet indexed
-        (backfill-in-progress); emits a warning log so misses are visible.
+        Single O(1) read against ``rfq_index``. Returns empty strings when
+        the rfq is unknown; callers raise 404.
         """
-        import logging
-
-        logger = logging.getLogger(logger_name)
-
         entry = await self._rfq_index_repo.get(rfq_id)
-        if entry is not None:
-            return entry.workflow_id, entry.vendor_id
-
-        logger.warning("rfq_index.miss rfq_id=%s falling_back_to_scan", rfq_id)
-
-        org = self._settings.workflow_default_organization_id
-        if not org:
+        if entry is None:
             return "", ""
-
-        entries = await self._index_repo.list_by_org(org)
-        for wf_entry in entries:
-            session = await self._buyer_reader.get_session(wf_entry.workflow_id)
-            if session is None:
-                continue
-            state = session.state if isinstance(session.state, dict) else {}
-            neg = state.get(NEGOTIATION_CONFIG_KEY)
-            if not isinstance(neg, dict):
-                continue
-            for vid, cfg in neg.items():
-                if not isinstance(cfg, dict):
-                    continue
-                if str(cfg.get("rfq_id") or "") == rfq_id:
-                    vendor_id = str(cfg.get("vendor_id") or vid)
-                    return wf_entry.workflow_id, vendor_id
-        return "", ""
+        return entry.workflow_id, entry.vendor_id
 
 
 def _override_for_rfq(buyer_state: dict, rfq_id: str) -> dict | None:
@@ -323,6 +290,72 @@ def _override_for_rfq(buyer_state: dict, rfq_id: str) -> dict | None:
         return None
     entry = overrides.get(rfq_id)
     return entry if isinstance(entry, dict) else None
+
+
+_VENDOR_STATUS_TO_LABEL: dict[str, str] = {
+    "RFQ_RECEIVED": "NEGOTIATING",
+    "QUOTE_SENT": "NEGOTIATING",
+    "NEGOTIATION_IN_PROGRESS": "NEGOTIATING",
+    "INITIATING": "NEGOTIATING",
+    "ACCEPTED": "CLOSED",
+    "PO_RECEIVED": "CLOSED",
+    "PO_ACKNOWLEDGED": "CLOSED",
+    "GRN_RECEIVED": "CLOSED",
+    "INVOICE_SUBMITTED": "CLOSED",
+    "COMPLETE": "CLOSED",
+    "RFQ_CLOSED": "CLOSED",
+    "VENDOR_WALKED_AWAY": "WALKED_AWAY",
+    "BUYER_WALKED_AWAY": "WALKED_AWAY",
+    # Buyer-side overrides.
+    "ESCALATED": "ESCALATED",
+    "WALKED_AWAY": "WALKED_AWAY",
+}
+
+
+def _row_from_thread_doc(
+    doc: VendorThreadStateDoc,
+    name_lookup: dict,
+) -> VendorThreadRowDTO:
+    """Map a stored vendor-thread state doc to the wire DTO the UI consumes.
+
+    Names are resolved from ``name_lookup`` only for docs whose ``vendorName``
+    was never populated (legacy or pre-rollout writes).
+    """
+    from api.services.ui_mappers import _format_relative
+
+    name = doc.vendor_name or (
+        (lookup_entry := name_lookup.get(doc.vendor_id)) and lookup_entry.name
+    ) or doc.vendor_id
+
+    label = _VENDOR_STATUS_TO_LABEL.get(doc.status, "NEGOTIATING")
+
+    return VendorThreadRowDTO(
+        id=doc.rfq_id,
+        vendorId=doc.vendor_id,
+        name=name,
+        country=doc.vendor_country or "—",
+        tier="Tier-2",
+        pr=doc.request_id or doc.workflow_id,
+        workflowId=doc.workflow_id,
+        last=_format_relative(doc.updated_at.isoformat()),
+        state=label,
+        unread=0,
+        msgs=doc.message_count,
+        round=doc.round if doc.round else None,
+        latestPrice=doc.last_offer_price,
+        done=doc.done,
+    )
+
+
+@dataclass
+class _AssembledVendorConvo:
+    """Bundle DTO + raw state alongside for the WS projection hook."""
+
+    dto: VendorConvoDTO
+    vendor_state: dict
+    buyer_state: dict | None
+    vendor_name: str
+    vendor_country: str
 
 
 async def _assemble_vendor_convo(
@@ -335,7 +368,7 @@ async def _assemble_vendor_convo(
     vendor_repo: VendorRepository,
     product_repo: ProductRepository | None,
     events_repo: WorkflowEventsRepository,
-) -> VendorConvoDTO | None:
+) -> _AssembledVendorConvo | None:
     """Shared by the REST handler and the WS factory.
 
     Returns ``None`` if the vendor session is missing; the REST handler
@@ -359,18 +392,19 @@ async def _assemble_vendor_convo(
     events = await events_repo.list_for_vendor_thread(workflow_id, rfq_id)
 
     override: dict | None = None
+    buyer_state_blob: dict | None = None
     if workflow_id:
         try:
             buyer_session = await buyer_reader.get_session(workflow_id)
         except Exception:  # noqa: BLE001 — override is optional
             buyer_session = None
         if buyer_session is not None:
-            buyer_state = (
+            buyer_state_blob = (
                 buyer_session.state if isinstance(buyer_session.state, dict) else {}
             )
-            override = _override_for_rfq(buyer_state, rfq_id)
+            override = _override_for_rfq(buyer_state_blob, rfq_id)
 
-    return vendor_convo_from_state(
+    dto = vendor_convo_from_state(
         rfq_id,
         state,
         workflow_id=workflow_id,
@@ -379,15 +413,30 @@ async def _assemble_vendor_convo(
         events=events,
         override=override,
     )
+    from api.services.ui_mappers import _vendor_country
+
+    country = _vendor_country(vendor_doc) if vendor_doc else ""
+    return _AssembledVendorConvo(
+        dto=dto,
+        vendor_state=state,
+        buyer_state=buyer_state_blob,
+        vendor_name=vendor_doc.name if vendor_doc else "",
+        vendor_country="" if country == "—" else country,
+    )
 
 
-async def build_vendor_convo(rfq_id: str) -> VendorConvoDTO | None:
+async def build_vendor_convo(
+    rfq_id: str,
+) -> tuple[VendorConvoDTO, "ProjectionPayload"] | None:
     """Module-level factory for ``state_changed`` broadcasts on vt: channels.
 
     Resolves rfq → workflow/vendor via the rfq_index and assembles the same
-    DTO ``get_thread`` returns. Returns ``None`` if the WS context is unset,
-    the rfq cannot be resolved, or the vendor session is missing.
+    DTO ``get_thread`` returns alongside a ``ProjectionPayload`` so the WS
+    hook mirrors the thread state into ``vendor_thread_state/{rfq_id}``.
+    Returns ``None`` if the WS context is unset, the rfq cannot be resolved,
+    or the vendor session is missing.
     """
+    from api.services.state_projection import ProjectionPayload
     from api.ws.context import get_ws_context
 
     ctx = get_ws_context()
@@ -414,7 +463,7 @@ async def build_vendor_convo(rfq_id: str) -> VendorConvoDTO | None:
         return None
 
     try:
-        return await _assemble_vendor_convo(
+        assembled = await _assemble_vendor_convo(
             rfq_id,
             workflow_id=entry.workflow_id,
             vendor_id=entry.vendor_id,
@@ -430,6 +479,22 @@ async def build_vendor_convo(rfq_id: str) -> VendorConvoDTO | None:
             rfq_id,
         )
         return None
+
+    if assembled is None:
+        return None
+
+    payload = ProjectionPayload(
+        kind="vendor_thread",
+        state=assembled.vendor_state,
+        workflow_id=entry.workflow_id,
+        rfq_id=rfq_id,
+        vendor_id=entry.vendor_id,
+        organization_id=entry.organization_id,
+        vendor_name=assembled.vendor_name,
+        vendor_country=assembled.vendor_country,
+        buyer_state=assembled.buyer_state,
+    )
+    return assembled.dto, payload
 
 
 async def _factory_buyer(workflow_id: str):

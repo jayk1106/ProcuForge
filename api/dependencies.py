@@ -18,9 +18,10 @@ from db.firestore.repositories.organisations import OrganisationRepository
 from db.firestore.repositories.products import ProductRepository
 from db.firestore.repositories.rfq_index import RfqIndexRepository
 from db.firestore.repositories.users import UserRepository
+from db.firestore.repositories.vendor_thread_state import VendorThreadStateRepository
 from db.firestore.repositories.vendors import VendorRepository
 from db.firestore.repositories.workflow_events import WorkflowEventsRepository
-from db.firestore.repositories.workflow_index import WorkflowIndexRepository
+from db.firestore.repositories.workflow_state import WorkflowStateRepository
 
 
 def get_firestore_client_dep() -> firestore.Client:
@@ -36,8 +37,14 @@ def get_product_repository(client: FirestoreClientDep) -> ProductRepository:
     return ProductRepository(client)
 
 
-def get_workflow_index_repository(client: FirestoreClientDep) -> WorkflowIndexRepository:
-    return WorkflowIndexRepository(client)
+def get_workflow_state_repository(client: FirestoreClientDep) -> WorkflowStateRepository:
+    return WorkflowStateRepository(client)
+
+
+def get_vendor_thread_state_repository(
+    client: FirestoreClientDep,
+) -> VendorThreadStateRepository:
+    return VendorThreadStateRepository(client)
 
 
 def get_vendor_repository(client: FirestoreClientDep) -> VendorRepository:
@@ -61,8 +68,11 @@ def get_organisation_repository(client: FirestoreClientDep) -> OrganisationRepos
 
 
 ProductRepositoryDep = Annotated[ProductRepository, Depends(get_product_repository)]
-WorkflowIndexRepositoryDep = Annotated[
-    WorkflowIndexRepository, Depends(get_workflow_index_repository)
+WorkflowStateRepositoryDep = Annotated[
+    WorkflowStateRepository, Depends(get_workflow_state_repository)
+]
+VendorThreadStateRepositoryDep = Annotated[
+    VendorThreadStateRepository, Depends(get_vendor_thread_state_repository)
 ]
 VendorRepositoryDep = Annotated[VendorRepository, Depends(get_vendor_repository)]
 RfqIndexRepositoryDep = Annotated[RfqIndexRepository, Depends(get_rfq_index_repository)]
@@ -78,24 +88,22 @@ OrganisationRepositoryDep = Annotated[
 def get_workflow_service(
     product_repo: ProductRepositoryDep,
     settings: SettingsDep,
-    index_repo: WorkflowIndexRepositoryDep,
 ) -> WorkflowService:
     return WorkflowService(
         product_repo=product_repo,
         settings=settings,
-        index_repo=index_repo,
     )
 
 
 def get_workflow_query_service(
     settings: SettingsDep,
-    index_repo: WorkflowIndexRepositoryDep,
+    state_repo: WorkflowStateRepositoryDep,
     vendor_repo: VendorRepositoryDep,
     events_repo: WorkflowEventsRepositoryDep,
 ) -> WorkflowQueryService:
     return WorkflowQueryService(
         settings=settings,
-        index_repo=index_repo,
+        state_repo=state_repo,
         vendor_repo=vendor_repo,
         events_repo=events_repo,
     )
@@ -103,7 +111,7 @@ def get_workflow_query_service(
 
 def get_vendor_thread_query_service(
     settings: SettingsDep,
-    index_repo: WorkflowIndexRepositoryDep,
+    thread_state_repo: VendorThreadStateRepositoryDep,
     vendor_repo: VendorRepositoryDep,
     rfq_index_repo: RfqIndexRepositoryDep,
     events_repo: WorkflowEventsRepositoryDep,
@@ -111,7 +119,7 @@ def get_vendor_thread_query_service(
 ) -> VendorThreadQueryService:
     return VendorThreadQueryService(
         settings=settings,
-        index_repo=index_repo,
+        thread_state_repo=thread_state_repo,
         vendor_repo=vendor_repo,
         rfq_index_repo=rfq_index_repo,
         events_repo=events_repo,
