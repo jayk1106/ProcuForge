@@ -145,6 +145,53 @@ def _extract_last_vendor_message(comms: list[Any]) -> dict[str, Any] | None:
     return None
 
 
+def _extract_last_buyer_priced_envelope(comms: list[Any]) -> dict[str, Any] | None:
+    """Walk ``comms`` newest-first; return the latest buyer COUNTER_OFFER / ACCEPT."""
+    priced = {MessageType.COUNTER_OFFER.value, MessageType.ACCEPT.value}
+    for entry in reversed(comms or []):
+        env = _coerce_dict(entry)
+        if env is None:
+            continue
+        from_agent = str(env.get("from_agent") or "")
+        if from_agent not in _BUYER_AGENT_NAMES:
+            continue
+        if str(env.get("message_type") or "") not in priced:
+            continue
+        return env
+    return None
+
+
+def _buyer_ultimatum_price(
+    vendor_state: dict[str, Any],
+    *,
+    prefer_last_counter: bool,
+) -> float | None:
+    """Pick the price the buyer puts in WALKAWAY.last_unit_price.
+
+    The walkaway carries the buyer's actual ceiling so the vendor's
+    accept/walkaway response is meaningful (vs. echoing the vendor's own quote
+    back to them, which was a no-op signal). Order:
+
+    - ``prefer_last_counter=True`` (rounds exhausted): last buyer counter →
+      ``budget_per_unit`` → ``target_price``.
+    - ``prefer_last_counter=False`` (is_final above budget): ``budget_per_unit``
+      → ``target_price`` → last buyer counter.
+    """
+    comms = vendor_state.get("communications") or []
+    last_counter_env = _extract_last_buyer_priced_envelope(comms)
+    last_counter = (
+        _to_float((last_counter_env.get("payload") or {}).get("unit_price"))
+        if last_counter_env
+        else None
+    )
+    budget = _to_float(vendor_state.get("budget_per_unit"))
+    target = _to_float(vendor_state.get("target_price"))
+
+    if prefer_last_counter:
+        return last_counter or budget or target
+    return budget or target or last_counter
+
+
 def _is_deadline_past(deadline: Any) -> bool:
     """True only when ``deadline`` parses to a UTC datetime strictly in the past."""
     if not isinstance(deadline, str) or not deadline.strip():
@@ -168,6 +215,48 @@ def _vendor_envelope_price(env: dict[str, Any]) -> float | None:
     return _to_float(payload.get("unit_price"))
 
 
+def _maybe_synthesize_buyer_accept(
+    *,
+    sent_message_type: MessageType,
+    parsed_reply: Any,
+    config: dict[str, Any],
+    builder: A2AMessageBuilder,
+    negotiation_round: int,
+) -> dict[str, Any] | None:
+    """Build a state-only buyer ACCEPT envelope when vendor ACCEPTs post-walkaway.
+
+    Returns ``None`` unless every condition holds:
+
+    - buyer's outbound was ``WALKAWAY``
+    - vendor's reply parsed to a dict with ``message_type == ACCEPT``
+    - vendor's accept ``unit_price`` is present and finite
+    - accept price is within ``config['budget_per_unit']`` (or no budget set)
+
+    The synthesized envelope is appended to ``communications`` (state only —
+    not sent over A2A) so the decision agent's last-even-index-buyer scan
+    classifies the vendor as ACCEPTED at the agreed price.
+    """
+    if sent_message_type != MessageType.WALKAWAY:
+        return None
+    if not isinstance(parsed_reply, dict):
+        return None
+    if str(parsed_reply.get("message_type") or "") != MessageType.ACCEPT.value:
+        return None
+
+    reply_payload = parsed_reply.get("payload") if isinstance(parsed_reply.get("payload"), dict) else {}
+    accept_price = _to_float(reply_payload.get("unit_price"))
+    if accept_price is None or accept_price <= 0:
+        return None
+
+    budget_per_unit = _to_float(config.get("budget_per_unit"))
+    # Tolerate sub-cent rounding so floats from the vendor side don't drop us
+    # to walkaway on a $30.001 vs $30.00 mismatch.
+    if budget_per_unit is not None and accept_price > budget_per_unit + 0.01:
+        return None
+
+    return builder.get_accept_payload(accept_price, negotiation_round)
+
+
 def _decide_next_move(
     vendor_state: dict[str, Any],
     request: dict[str, Any],
@@ -185,7 +274,9 @@ def _decide_next_move(
     3. currency mismatch vs request -> WALKAWAY(PRICE_GAP_TOO_LARGE)
     4. response_deadline parseable and past -> WALKAWAY(QUOTE_EXPIRED)
     5. vendor is_final=True -> ACCEPT if within budget; else WALKAWAY(PRICE_GAP_TOO_LARGE)
+       with last_unit_price = budget_per_unit (buyer's true ceiling, not vendor's quote)
     6. round >= _MAX_NEGOTIATION_ROUNDS -> WALKAWAY(MAX_ROUNDS_REACHED) (only when vendor isn't final)
+       with last_unit_price = buyer's last counter (the natural ultimatum)
     7. round == 0 AND vendor_price > target -> COUNTER (force first counter even on generous budgets)
     8. vendor_price within ACCEPT band of target AND within budget -> ACCEPT
     9. else COUNTER, floored at counter_floor and capped at budget_per_unit
@@ -279,7 +370,10 @@ def _decide_next_move(
 
     # 5. Vendor declared best-and-final. ACCEPT if within budget; otherwise
     # WALKAWAY — the vendor has signalled they won't move, so further counters
-    # are wasted rounds.
+    # are wasted rounds. The walkaway carries the buyer's true ceiling
+    # (budget_per_unit) as last_unit_price so the vendor can decide whether to
+    # close the deal at the buyer's max instead of echoing back the same
+    # rejected quote.
     if is_final and vendor_price is not None:
         if budget_per_unit is None or vendor_price <= budget_per_unit:
             return {
@@ -288,15 +382,19 @@ def _decide_next_move(
                 "price": vendor_price,
                 "reason": "is_final_within_budget",
             }
-        return {
+        out = {
             "vendor_id": vendor_id,
             "message_type": MessageType.WALKAWAY.value,
             "walkaway_reason": "PRICE_GAP_TOO_LARGE",
-            "price": vendor_price,
             "reason": "is_final_above_budget",
         }
+        ultimatum = _buyer_ultimatum_price(vendor_state, prefer_last_counter=False)
+        if ultimatum is not None:
+            out["price"] = round(ultimatum, 2)
+        return out
 
-    # 6. Rounds exhausted.
+    # 6. Rounds exhausted. WALKAWAY carries the buyer's last counter as the
+    # natural ultimatum — if the vendor can meet it they should ACCEPT.
     last_round = int(cur_round) if isinstance(cur_round, int) else 0
     if last_round >= _MAX_NEGOTIATION_ROUNDS:
         out = {
@@ -305,8 +403,9 @@ def _decide_next_move(
             "walkaway_reason": "MAX_ROUNDS_REACHED",
             "reason": f"round_{last_round}_exhausted",
         }
-        if vendor_price is not None:
-            out["price"] = vendor_price
+        ultimatum = _buyer_ultimatum_price(vendor_state, prefer_last_counter=True)
+        if ultimatum is not None:
+            out["price"] = round(ultimatum, 2)
         return out
 
     if vendor_price is None:
@@ -750,6 +849,29 @@ async def negotiate_with_vendor(
         config["communications"].append(reply)
     if message_type in (MessageType.ACCEPT, MessageType.WALKAWAY):
         config["done"] = True
+
+    # Vendor-ACCEPT-after-buyer-WALKAWAY recovery: if we walked away and the
+    # vendor responded with ACCEPT at a within-budget price, the negotiation
+    # actually succeeded. Append a synthetic buyer ACCEPT so the decision
+    # agent's "last even-index buyer message" lookup classifies this vendor as
+    # ACCEPTED. State-only — no A2A send: the vendor's session already shows
+    # their ACCEPT, both sides agree on the price.
+    synth_accept = _maybe_synthesize_buyer_accept(
+        sent_message_type=message_type,
+        parsed_reply=parsed_reply,
+        config=config,
+        builder=builder,
+        negotiation_round=round,
+    )
+    if synth_accept is not None:
+        config["communications"].append(synth_accept)
+        _LOG.info(
+            "post_walkaway_accept_synth  rfq_id=%s vendor_id=%s unit_price=%s",
+            config.get("rfq_id"),
+            vendor_id,
+            synth_accept.get("payload", {}).get("unit_price"),
+        )
+
     nego[vendor_id] = config
     state[NEGOTIATION_CONFIG_KEY] = nego  # final write-back including vendor reply
 
