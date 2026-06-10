@@ -17,6 +17,7 @@ import { PoCard, GrnCard, InvoiceCard, ApprovalBanner } from './DocumentCards'
 import { ActionBanner } from './ActionBanner'
 import { StateDebugPanel } from '@/components/primitives/StateDebugPanel'
 import { useWorkflowSocket } from '@/hooks/useWorkflowSocket'
+import { mergeVendorsById } from './mergeVendors'
 
 interface FlowDetailClientProps {
   workflowId: string
@@ -88,7 +89,12 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
 
   useWorkflowSocket<ActiveFlow>(`/ws/workflow/${workflowId}`, {
     onState: (next) => {
-      setFlow(next)
+      // Only vendors get merge-by-id protection — parallel negotiator tools
+      // can broadcast snapshots that omit a sibling vendor mid-flight. All
+      // other fields are replaced wholesale.
+      setFlow((prev) =>
+        prev ? { ...next, vendors: mergeVendorsById(prev.vendors, next.vendors) } : next,
+      )
       setError(null)
     },
     debugLabel: 'flow',
