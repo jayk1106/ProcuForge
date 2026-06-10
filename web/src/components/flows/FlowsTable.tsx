@@ -6,10 +6,8 @@ import type { WorkflowRow } from '@/types/workflow'
 import { FilterChip } from '@/components/primitives/FilterChip'
 import { PhaseDots } from './PhaseDots'
 import { StatusPill } from '@/components/primitives/StatusPill'
-import { PfSelect } from '@/components/primitives/PfSelect'
 
-type FilterKey = 'all' | 'progress' | 'action' | 'completed' | 'walked'
-type SortKey = 'recent' | 'action' | 'longest'
+type FilterKey = 'all' | 'progress' | 'action' | 'completed'
 
 interface FlowsTableProps {
   onNewRequest: () => void
@@ -19,8 +17,6 @@ interface FlowsTableProps {
 export function FlowsTable({ onNewRequest, onLoaded }: FlowsTableProps) {
   const router = useRouter()
   const [filter, setFilter] = useState<FilterKey>('all')
-  const [sort, setSort] = useState<SortKey>('recent')
-  const [query, setQuery] = useState('')
   const [rows, setRows] = useState<WorkflowRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -48,7 +44,6 @@ export function FlowsTable({ onNewRequest, onLoaded }: FlowsTableProps) {
     progress: rows.filter((f) => !f.walked && f.phase !== 'DONE').length,
     action: rows.filter((f) => f.needsAction).length,
     completed: rows.filter((f) => f.phase === 'DONE').length,
-    walked: rows.filter((f) => f.walked).length,
   }
 
   const filtered = useMemo(() => {
@@ -56,19 +51,8 @@ export function FlowsTable({ onNewRequest, onLoaded }: FlowsTableProps) {
     if (filter === 'progress') list = list.filter((f) => !f.walked && f.phase !== 'DONE')
     if (filter === 'action') list = list.filter((f) => f.needsAction)
     if (filter === 'completed') list = list.filter((f) => f.phase === 'DONE')
-    if (filter === 'walked') list = list.filter((f) => f.walked)
-    if (query) {
-      const q = query.toLowerCase()
-      list = list.filter((f) =>
-        (f.id + ' ' + (f.requestId ?? '') + ' ' + f.product + ' ' + f.requestedBy)
-          .toLowerCase()
-          .includes(q)
-      )
-    }
-    if (sort === 'action') list.sort((a, b) => (b.needsAction ? 1 : 0) - (a.needsAction ? 1 : 0))
-    if (sort === 'longest') list.sort((a, b) => b.days - a.days)
     return list
-  }, [rows, filter, sort, query])
+  }, [rows, filter])
 
   function openFlow(id: string) {
     router.push(`/flows/${id}`)
@@ -127,39 +111,11 @@ export function FlowsTable({ onNewRequest, onLoaded }: FlowsTableProps) {
             >
               COMPLETED
             </FilterChip>
-            <FilterChip
-              active={filter === 'walked'}
-              onClick={() => setFilter('walked')}
-              count={counts.walked}
-            >
-              WALKED AWAY
-            </FilterChip>
           </div>
           <div className="spacer" />
-          <div className="search">
-            <span className="br">/</span>
-            <input
-              placeholder="search id, product, requester…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </div>
-          <div className="row" style={{ gap: 6 }}>
-            <span className="t-xs muted upper">sort</span>
-            <PfSelect value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
-              <option value="recent">most recent</option>
-              <option value="action">action needed first</option>
-              <option value="longest">longest pending</option>
-            </PfSelect>
-          </div>
-          <div className="row" style={{ gap: 6 }}>
-            <button className="btn" onClick={load}>
-              [ refresh ]
-            </button>
-            <button className="btn accent" onClick={onNewRequest}>
-              [ + new request ]
-            </button>
-          </div>
+          <button className="btn" onClick={load}>
+            [ refresh ]
+          </button>
         </div>
       </div>
 

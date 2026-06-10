@@ -17,12 +17,12 @@ export default function FlowsPage() {
   return (
     <div className="viewport">
       <div className="crumbs">
-        <span className="here">Flows</span>
+        <span className="here">Requests</span>
       </div>
 
       <header className="page-head">
         <div>
-          <h1 className="page-title">Flows</h1>
+          <h1 className="page-title">Requests</h1>
           <div className="page-sub">
             All purchase requests across your org · {summary.total} total · {summary.needsAction}{' '}
             need action

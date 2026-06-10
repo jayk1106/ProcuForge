@@ -10,7 +10,6 @@ import { Section } from '@/components/primitives/Section'
 import { Bracketed } from '@/components/primitives/Bracketed'
 import { Timeline } from './Timeline'
 import { SidebarNav } from './SidebarNav'
-import { ActivityRail } from './ActivityRail'
 import { NegotiationBoard } from './NegotiationBoard'
 import { DiscoveredVendorsBoard } from './DiscoveredVendorsBoard'
 import { PoCard, GrnCard, InvoiceCard, ApprovalBanner } from './DocumentCards'
@@ -69,6 +68,20 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
   const [approving, setApproving] = useState(false)
   const [resolvingEscalation, setResolvingEscalation] = useState(false)
   const [activeSec, setActiveSec] = useState('spec')
+  const viewportRef = useRef<HTMLDivElement>(null)
+  const headRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const head = headRef.current
+    const viewport = viewportRef.current
+    if (!head || !viewport) return
+    const ro = new ResizeObserver(() => {
+      // 56px topnav offset + measured head height + a small gap
+      viewport.style.setProperty('--flow-head-bottom', `${56 + head.offsetHeight + 12}px`)
+    })
+    ro.observe(head)
+    return () => ro.disconnect()
+  }, [flow])
 
   // load() only mutates `flow`/`error`; no loading flag. The render below
   // shows a splash only while `flow` is null, so WS-driven updates and
@@ -279,7 +292,7 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
     pending?.step === 'grn'
       ? actionRequiredPill
       : pillForStatus(phaseStatus.grn, {
-          done: 'received',
+          done: 'sent',
           inProgress: 'in transit',
           pending: 'pending',
         })
@@ -301,10 +314,10 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
   const invoice = flow.invoice as Record<string, unknown> | null | undefined
 
   return (
-    <div className="viewport">
+    <div className="viewport flow-detail-viewport" ref={viewportRef}>
       <div className="crumbs">
         <a onClick={() => router.push('/flows')} style={{ cursor: 'pointer' }}>
-          Flows
+          Requests
         </a>
         <span className="sep">/</span>
         <span className="here">{flow.requestId ?? flow.id.slice(0, 8)}</span>
@@ -322,9 +335,7 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
               {flow.title}
             </h1>
             <div className="page-sub">
-              opened {flow.opened} · requester{' '}
-              <span className="ink">{flow.requester}</span> · cost center {flow.costCenter} · need
-              by {flow.needBy}
+              opened {flow.opened} · need by {flow.needBy}
             </div>
           </div>
           <div className="row" style={{ gap: 6 }}>
@@ -381,14 +392,16 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
         </div>
       )}
 
-      <Timeline
-        phase={isEmpty ? 'rfq' : flow.currentPhase}
-        durations={flow.phaseDurations}
-        phaseStatus={phaseStatus}
-        empty={isEmpty}
-      />
+      <div className="flow-timeline-sticky" ref={headRef}>
+        <Timeline
+          phase={isEmpty ? 'rfq' : flow.currentPhase}
+          durations={flow.phaseDurations}
+          phaseStatus={phaseStatus}
+          empty={isEmpty}
+        />
+      </div>
 
-      <div className="flow-layout" style={{ marginTop: 20 }}>
+      <div className="flow-layout no-rail" style={{ marginTop: 20 }}>
         <SidebarNav
           active={activeSec}
           onPick={handlePickSection}
@@ -620,8 +633,6 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
                 </Section>
               </div>
         </main>
-
-        <ActivityRail items={flow.activity} />
       </div>
 
       <StateDebugPanel

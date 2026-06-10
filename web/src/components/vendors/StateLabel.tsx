@@ -10,8 +10,18 @@ const stateMap: Record<string, 'ok' | 'warn' | 'err' | 'go' | 'idle'> = {
   INVOICE_DISPUTE: 'warn',
   OFFER_LOCKED: 'ok',
   CLOSED: 'idle',
+  COMPLETE: 'idle',
+  COMPLETED: 'idle',
+  PROCESS_COMPLETE: 'idle',
   WALKED_AWAY: 'err',
 }
+
+const CLOSED_STATES = new Set([
+  'CLOSED',
+  'COMPLETE',
+  'COMPLETED',
+  'PROCESS_COMPLETE',
+])
 
 interface StateLabelProps {
   s: string
@@ -19,9 +29,6 @@ interface StateLabelProps {
 
 export function StateLabel({ s }: StateLabelProps) {
   const kind = stateMap[s] || 'idle'
-  return (
-    <StatusPill kind={kind}>
-      {s.replace(/_/g, ' ').toLowerCase()}
-    </StatusPill>
-  )
+  const label = CLOSED_STATES.has(s) ? 'closed' : s.replace(/_/g, ' ').toLowerCase()
+  return <StatusPill kind={kind}>{label}</StatusPill>
 }

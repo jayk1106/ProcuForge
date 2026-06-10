@@ -1,6 +1,7 @@
 'use client'
 
-import React, { useCallback, useEffect, useId, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { searchProducts } from '@/lib/api-client'
 import { useDebouncedValue } from '@/lib/useDebouncedValue'
 import type { ProductOption } from '@/types/product'
@@ -25,15 +26,39 @@ function optionLabel(product: ProductOption): string {
 export function ProductPicker({ value, selected, onChange, disabled }: ProductPickerProps) {
   const listId = useId()
   const containerRef = useRef<HTMLDivElement>(null)
+  const anchorRef = useRef<HTMLDivElement>(null)
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
   const [options, setOptions] = useState<ProductOption[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [anchorRect, setAnchorRect] = useState<{ left: number; top: number; width: number } | null>(null)
+  const [mounted, setMounted] = useState(false)
 
   const debouncedQuery = useDebouncedValue(query, 300)
 
   const displayValue = open ? query : selected ? optionLabel(selected) : query
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  useLayoutEffect(() => {
+    if (!open) return
+    function updateRect() {
+      const el = anchorRef.current
+      if (!el) return
+      const r = el.getBoundingClientRect()
+      setAnchorRect({ left: r.left, top: r.bottom, width: r.width })
+    }
+    updateRect()
+    window.addEventListener('resize', updateRect)
+    window.addEventListener('scroll', updateRect, true)
+    return () => {
+      window.removeEventListener('resize', updateRect)
+      window.removeEventListener('scroll', updateRect, true)
+    }
+  }, [open])
 
   const load = useCallback(async (q: string) => {
     setLoading(true)
@@ -56,13 +81,19 @@ export function ProductPicker({ value, selected, onChange, disabled }: ProductPi
 
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
-      if (!containerRef.current?.contains(e.target as Node)) {
-        setOpen(false)
+      const target = e.target as Node
+      if (containerRef.current?.contains(target)) return
+      if (
+        target instanceof Element &&
+        target.closest(`[data-product-picker-list="${listId}"]`)
+      ) {
+        return
       }
+      setOpen(false)
     }
     document.addEventListener('mousedown', onDocClick)
     return () => document.removeEventListener('mousedown', onDocClick)
-  }, [])
+  }, [listId])
 
   function handleFocus() {
     if (disabled) return
@@ -85,36 +116,88 @@ export function ProductPicker({ value, selected, onChange, disabled }: ProductPi
     load('')
   }
 
+  const dropdown = open && anchorRect && mounted ? createPortal(
+    <div
+      id={listId}
+      role="listbox"
+      data-product-picker-list={listId}
+      className="box box-pad"
+      style={{
+        position: 'fixed',
+        zIndex: 1000,
+        left: anchorRect.left,
+        top: anchorRect.top + 4,
+        width: anchorRect.width,
+        maxHeight: 260,
+        overflowY: 'auto',
+        background: 'var(--bg)',
+        border: '1px solid var(--rule-strong)',
+        boxShadow: '0 8px 24px rgba(0,0,0,0.18)',
+      }}
+    >
+      {loading && <div className="t-sm muted">loading…</div>}
+      {error && <div className="t-sm accent">{error}</div>}
+      {!loading && !error && options.length === 0 && (
+        <div className="t-sm muted">No products match.</div>
+      )}
+      {!loading &&
+        options.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            role="option"
+            aria-selected={p.id === value}
+            className="btn"
+            style={{
+              display: 'block',
+              width: '100%',
+              textAlign: 'left',
+              marginBottom: 4,
+              fontWeight: p.id === value ? 600 : 400,
+            }}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => handleSelect(p)}
+          >
+            <div>{optionLabel(p)}</div>
+            <div className="t-xs faint">{formatPriceHint(p)}</div>
+          </button>
+        ))}
+    </div>,
+    document.body,
+  ) : null
+
   return (
     <div ref={containerRef} style={{ position: 'relative' }}>
-      <Field label="Product" required hint="Search catalog by name or brand">
-        <input
-          type="text"
-          role="combobox"
-          aria-expanded={open}
-          aria-controls={listId}
-          aria-autocomplete="list"
-          disabled={disabled}
-          value={displayValue}
-          placeholder="Search products…"
-          onFocus={handleFocus}
-          onChange={(e) => {
-            setQuery(e.target.value)
-            setOpen(true)
-            if (value) onChange('', null)
-          }}
-          style={{
-            flex: 1,
-            border: 0,
-            outline: 0,
-            background: 'transparent',
-            fontFamily: 'inherit',
-            fontSize: 'inherit',
-            padding: '6px 0',
-            minWidth: 0,
-          }}
-        />
-      </Field>
+      <div ref={anchorRef}>
+        <Field label="Product" required hint="Search catalog by name or brand">
+          <input
+            type="text"
+            role="combobox"
+            aria-expanded={open}
+            aria-controls={listId}
+            aria-autocomplete="list"
+            disabled={disabled}
+            value={displayValue}
+            placeholder="Search products…"
+            onFocus={handleFocus}
+            onChange={(e) => {
+              setQuery(e.target.value)
+              setOpen(true)
+              if (value) onChange('', null)
+            }}
+            style={{
+              flex: 1,
+              border: 0,
+              outline: 0,
+              background: 'transparent',
+              fontFamily: 'inherit',
+              fontSize: 'inherit',
+              padding: '6px 0',
+              minWidth: 0,
+            }}
+          />
+        </Field>
+      </div>
 
       {value && !open && (
         <button
@@ -128,52 +211,7 @@ export function ProductPicker({ value, selected, onChange, disabled }: ProductPi
         </button>
       )}
 
-      {open && (
-        <div
-          id={listId}
-          role="listbox"
-          className="box box-pad"
-          style={{
-            position: 'absolute',
-            zIndex: 20,
-            left: 0,
-            right: 0,
-            marginTop: 4,
-            maxHeight: 220,
-            overflowY: 'auto',
-            background: 'var(--surface)',
-            border: '1px solid var(--border)',
-          }}
-        >
-          {loading && <div className="t-sm muted">loading…</div>}
-          {error && <div className="t-sm accent">{error}</div>}
-          {!loading && !error && options.length === 0 && (
-            <div className="t-sm muted">No products match.</div>
-          )}
-          {!loading &&
-            options.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                role="option"
-                aria-selected={p.id === value}
-                className="btn"
-                style={{
-                  display: 'block',
-                  width: '100%',
-                  textAlign: 'left',
-                  marginBottom: 4,
-                  fontWeight: p.id === value ? 600 : 400,
-                }}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => handleSelect(p)}
-              >
-                <div>{optionLabel(p)}</div>
-                <div className="t-xs faint">{formatPriceHint(p)}</div>
-              </button>
-            ))}
-        </div>
-      )}
+      {dropdown}
     </div>
   )
 }

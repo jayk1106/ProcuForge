@@ -12,17 +12,8 @@ export function Footer() {
         marginTop: 32,
       }}
     >
-      <div className="row between">
-        <div>
-          procuforge<span className="accent">~</span> · build 2026.05.09 · all agent actions are logged immutably.
-        </div>
-        <div className="row" style={{ gap: 12 }}>
-          <a>docs</a>
-          <span className="sep-dot">·</span>
-          <a>policy</a>
-          <span className="sep-dot">·</span>
-          <a>status</a>
-        </div>
+      <div>
+        procuforge<span className="accent">~</span>
       </div>
     </footer>
   )
