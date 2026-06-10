@@ -181,11 +181,17 @@ def transition_after_negotiation(state: MutableMapping[str, Any]) -> None:
 # ── decision ──────────────────────────────────────────────────────────────────
 
 def transition_after_decision(state: MutableMapping[str, Any]) -> None:
-    """NEGOTIATION_COMPLETED -> VENDOR_SELECTED."""
+    """NEGOTIATION_IN_PROGRESS / NEGOTIATION_COMPLETED -> VENDOR_SELECTED.
+
+    Accepts both source states because the negotiator's LLM may transfer
+    control to ``decision_agent`` (a peer sub_agent of ``pr_router``) before
+    the negotiator's ``after_agent_callback`` has run ``transition_after_negotiation``.
+    Once a vendor has been selected, the decision supersedes the in-progress flag.
+    """
     current = _parse_current(state.get(PR_STATUS_KEY))
     if current == PrStatus.VENDOR_SELECTED:
         return
-    if current != PrStatus.NEGOTIATION_COMPLETED:
+    if current not in (PrStatus.NEGOTIATION_IN_PROGRESS, PrStatus.NEGOTIATION_COMPLETED):
         return
     _set(state, current, PrStatus.VENDOR_SELECTED)
 
