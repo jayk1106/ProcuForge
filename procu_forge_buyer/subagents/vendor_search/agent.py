@@ -1,6 +1,6 @@
 from google.adk.agents import Agent
 
-from adk_vertex_model import vertex_flash_model
+from adk_vertex_model import vertex_flash_llm
 
 from .callbacks import (
     log_vendor_search_after_agent,
@@ -30,7 +30,7 @@ Tone: concise and factual.
 
 vendor_search_agent = Agent(
     name="vendor_search_agent",
-    model=vertex_flash_model(),
+    model=vertex_flash_llm(),
     description="Loads supplier lines for the workflow product from the vendor catalog.",
     instruction=VENDOR_SEARCH_INSTRUCTION,
     tools=[load_vendor_offers_for_product],

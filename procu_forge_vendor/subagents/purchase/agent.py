@@ -1,6 +1,6 @@
 from google.adk.agents import Agent
 
-from adk_vertex_model import vertex_flash_model
+from adk_vertex_model import vertex_flash_llm
 
 from .callback import after_agent_callback
 from .tools import submit_invoice
@@ -26,7 +26,7 @@ before_agent_callback; do not handle them here.
 
 purchase_manager_agent = Agent(
     name="purchase_manager_agent",
-    model=vertex_flash_model(),
+    model=vertex_flash_llm(),
     description="Submits an invoice after the buyer's GRN_CREATED is received and validated.",
     instruction=PURCHASE_INSTRUCTION,
     tools=[submit_invoice],

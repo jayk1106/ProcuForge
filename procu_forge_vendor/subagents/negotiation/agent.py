@@ -1,6 +1,6 @@
 from google.adk.agents import Agent
 
-from adk_vertex_model import vertex_flash_model
+from adk_vertex_model import vertex_flash_llm
 
 from .callback import after_agent_callback
 from .tools import decide_response, send_response
@@ -54,7 +54,7 @@ you only orchestrate.
 
 negotiation_agent = Agent(
     name="negotiation_agent",
-    model=vertex_flash_model(),
+    model=vertex_flash_llm(),
     description="Handles counter-offers and confirmations anchored on relationship-derived last selling price.",
     instruction=NEGOTIATION_INSTRUCTION,
     tools=[decide_response, send_response],

@@ -1,7 +1,7 @@
 from google.adk.agents import Agent
 from google.adk.tools.agent_tool import AgentTool
 
-from adk_vertex_model import vertex_flash_model
+from adk_vertex_model import vertex_flash_llm
 
 from .callbacks import (
     inject_planner_session_state_before_model,
@@ -53,7 +53,7 @@ planner_agent = Agent(
         "other_context, confidence) for the buyer orchestrator."
     ),
     instruction=PLANNER_INSTRUCTION,
-    model=vertex_flash_model(),
+    model=vertex_flash_llm(),
     output_schema=PlannerPlan,
     output_key=PLANNER_PLAN_KEY,
     before_agent_callback=log_planner_before_agent,

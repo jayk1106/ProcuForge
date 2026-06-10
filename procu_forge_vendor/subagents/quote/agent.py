@@ -1,6 +1,6 @@
 from google.adk.agents import Agent
 
-from adk_vertex_model import vertex_flash_model
+from adk_vertex_model import vertex_flash_llm
 
 from .tools import quote_product
 
@@ -20,7 +20,7 @@ after_agent_callback delivers it to the buyer over A2A automatically.
 
 quote_agent = Agent(
     name="quote_agent",
-    model=vertex_flash_model(),
+    model=vertex_flash_llm(),
     description="Looks up vendor catalog pricing in Firestore and issues A2A QUOTE envelopes.",
     instruction=QUOTE_INSTRUCTION,
     tools=[quote_product],

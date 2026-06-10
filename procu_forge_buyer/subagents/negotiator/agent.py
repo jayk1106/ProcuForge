@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 from google.adk.agents import Agent
 from google.adk.agents.readonly_context import ReadonlyContext
 
-from adk_vertex_model import vertex_flash_model
+from adk_vertex_model import vertex_flash_llm
 
 from .callbacks import (
     negotiator_after_agent_with_transition,
@@ -81,7 +81,7 @@ def negotiator_instruction(context: ReadonlyContext) -> str:
 
 negotiator_agent = Agent(
     name="negotiator_agent",
-    model=vertex_flash_model(),
+    model=vertex_flash_llm(),
     description="Negotiates quotes with external vendors over the A2A protocol.",
     instruction=negotiator_instruction,
     tools=[negotiate_with_vendor],

@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 from google.adk.agents import Agent, LoopAgent
 
-from adk_vertex_model import vertex_flash_model
+from adk_vertex_model import vertex_flash_llm
 
 from .logging_config import configure_buyer_logging
 from .callbacks import (
@@ -87,7 +87,7 @@ pr_router = Agent(
         "Terminal and human-gated states rely on pr_status, not exit_loop."
     ),
     instruction=PR_ROUTER_INSTRUCTION,
-    model=vertex_flash_model(),
+    model=vertex_flash_llm(),
     sub_agents=[
         vendor_search_agent,
         negotiator_agent,

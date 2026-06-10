@@ -1,6 +1,6 @@
 from google.adk.agents import Agent
 
-from adk_vertex_model import vertex_flash_model
+from adk_vertex_model import vertex_flash_llm
 
 WORKFLOW_QA_INSTRUCTION = """
 You are the **workflow_qa_agent**: a concise procurement assistant scoped to a single purchase request.
@@ -22,7 +22,7 @@ Rules:
 
 workflow_qa_agent = Agent(
     name="workflow_qa_agent",
-    model=vertex_flash_model(),
+    model=vertex_flash_llm(),
     description="Answers buyer questions about a single procurement workflow using a state snapshot.",
     instruction=WORKFLOW_QA_INSTRUCTION,
 )
