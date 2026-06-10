@@ -19,15 +19,26 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from api.services.status_mapping import parse_pr_status
+from api.services.status_mapping import effective_pr_status, pr_status_to_phase_label
 from api.services.ui_mappers import workflow_row_from_state
 from db.collections.vendor_thread_state import VendorThreadStateDoc
 from db.collections.workflow_state import WorkflowStateDoc
+from procu_forge_buyer.pr_status import PrStatus
 from procu_forge_buyer.state_keys import (
     PR_STATUS_KEY,
     REQUEST_KEY,
     VENDOR_THREAD_OVERRIDES_KEY,
 )
+
+_WALKED_PR_STATUSES = {PrStatus.NO_VENDOR_AVAILABLE, PrStatus.NO_VENDORS_DISCOVERED}
+
+
+def _phase_group_for(pr_status: PrStatus) -> str:
+    if pr_status in _WALKED_PR_STATUSES:
+        return "WALKED"
+    if pr_status_to_phase_label(pr_status) == "DONE":
+        return "DONE"
+    return "IN_PROGRESS"
 from procu_forge_vendor.state_keys import (
     COMMUNICATION_KEY,
     LAST_SELLING_PRICE_KEY,
@@ -153,7 +164,12 @@ async def project_workflow_state(
             started_at = datetime.now(timezone.utc)
 
         now = datetime.now(timezone.utc)
-        pr_status = parse_pr_status(buyer_state.get(PR_STATUS_KEY))
+        # Use the effective status (folds in vendor-ack keys) so phaseGroup and
+        # prStatus match what the detail page and row mapper show. Otherwise a
+        # workflow that's effectively COMPLETED via process_complete_vendor_ack
+        # but whose stored pr_status lags would be stamped IN_PROGRESS, and the
+        # ?status=completed list filter would silently skip it.
+        pr_status = effective_pr_status(buyer_state)
 
         doc = WorkflowStateDoc(
             id=workflow_id,
@@ -166,6 +182,7 @@ async def project_workflow_state(
             productName=row.product,
             requesterId=row.requested_by,
             prStatus=pr_status.value,
+            phaseGroup=_phase_group_for(pr_status),
             startedAt=started_at,
             updatedAt=now,
             vendorCount=row.vendors,

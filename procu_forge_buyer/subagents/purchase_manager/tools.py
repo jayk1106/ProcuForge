@@ -55,6 +55,7 @@ from procu_forge_buyer.state_keys import (
     REQUEST_KEY,
     RFQ_CLOSED_LOSERS_KEY,
     SELECTED_VENDOR_KEY,
+    WALKAWAY_LOSERS_KEY,
 )
 
 # Approval-step constants (mirrored in APPROVED_STEPS_KEY).
@@ -279,6 +280,48 @@ def _rfq_closed_losers(state: _StateReader) -> dict[str, bool]:
     return {str(k): bool(v) for k, v in raw.items() if v}
 
 
+def _walkaway_losers(state: _StateReader) -> dict[str, bool]:
+    raw = state.get(WALKAWAY_LOSERS_KEY) or {}
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k): bool(v) for k, v in raw.items() if v}
+
+
+def _last_buyer_message_type(communications: list[Any] | None) -> str | None:
+    """Return the message_type of the most recent buyer-originated envelope."""
+    if not isinstance(communications, list):
+        return None
+    for entry in reversed(communications):
+        env: dict[str, Any] | None = None
+        if isinstance(entry, dict):
+            env = entry
+        elif isinstance(entry, str):
+            try:
+                parsed = json.loads(entry)
+                if isinstance(parsed, dict):
+                    env = parsed
+            except json.JSONDecodeError:
+                continue
+        if env is None:
+            continue
+        if str(env.get("from_agent") or "") != "buyer_agent":
+            continue
+        mt = env.get("message_type")
+        return str(mt) if mt else None
+    return None
+
+
+def _needs_walkaway_before_close(config: dict[str, Any] | None) -> bool:
+    """A losing vendor needs WALKAWAY first iff buyer's last message was ACCEPT.
+
+    Other end-states (buyer WALKAWAY, vendor WALKAWAY) already closed the
+    thread semantically — RFQ_CLOSED alone is enough.
+    """
+    if not isinstance(config, dict):
+        return False
+    return _last_buyer_message_type(config.get("communications")) == "ACCEPT"
+
+
 def _all_losing_vendors_notified(state: _StateReader) -> bool:
     losing = _losing_vendor_ids(state)
     if not losing:
@@ -293,6 +336,7 @@ def purchase_progress_snapshot(state: _StateReader) -> dict[str, Any]:
         "pr_status": state.get(PR_STATUS_KEY),
         "acks": _purchase_ack_snapshot(state),
         "rfq_closed_losers": sorted(_rfq_closed_losers(state).keys()),
+        "walkaway_losers": sorted(_walkaway_losers(state).keys()),
     }
 
 
@@ -305,7 +349,11 @@ def purchase_made_progress(before: dict[str, Any], after: dict[str, Any]) -> boo
         return True
     before_closed = set(before.get("rfq_closed_losers") or [])
     after_closed = set(after.get("rfq_closed_losers") or [])
-    return len(after_closed) > len(before_closed)
+    if len(after_closed) > len(before_closed):
+        return True
+    before_walk = set(before.get("walkaway_losers") or [])
+    after_walk = set(after.get("walkaway_losers") or [])
+    return len(after_walk) > len(before_walk)
 
 
 def _build_po_envelope(
@@ -354,6 +402,7 @@ def build_purchase_progress(state: _StateReader) -> dict[str, Any]:
     invoice = _as_dict(state, INVOICE_KEY)
     losing = _losing_vendor_ids(state)
     closed = _rfq_closed_losers(state)
+    walked = _walkaway_losers(state)
 
     return {
         "pr_status": state.get(PR_STATUS_KEY),
@@ -363,6 +412,7 @@ def build_purchase_progress(state: _StateReader) -> dict[str, Any]:
         "rfq_closed": {
             "losing_vendor_ids": losing,
             "notified_vendor_ids": sorted(closed.keys()),
+            "walkaway_vendor_ids": sorted(walked.keys()),
             "all_notified": _all_losing_vendors_notified(state),
         },
         "steps": {
@@ -772,12 +822,183 @@ async def _call_rfq_closed_with_retry(envelope_json: str, rfq_id: str) -> tuple[
     return reply, parsed, err
 
 
-async def _notify_losing_vendors(state: Any) -> dict[str, Any]:
-    """Send RFQ_CLOSED to every losing vendor that hasn't yet been notified.
+def _parse_walkaway_reply(reply: str) -> tuple[dict[str, Any] | None, str | None]:
+    """Return (parsed_ack, error) when a vendor acknowledged a WALKAWAY.
 
-    Called from inside ``send_po``. Idempotent per vendor: a vendor is marked
-    closed when its reply is a successful RFQ_CLOSED ack (full envelope or
-    vendor short-circuit ``ok: true``). ``state`` is the live ADK session state.
+    Vendor side returns a WALKAWAY envelope (BUYER_WALKAWAY_ACKNOWLEDGED) or,
+    when its message-id dedupe kicks in on a retry, a plain ``{ok: true}`` ack.
+    """
+    parsed = parse_vendor_envelope(reply)
+    if parsed is None:
+        if not (reply or "").strip():
+            return None, "empty vendor reply"
+        return None, "vendor reply was not parseable JSON"
+    err = vendor_error(parsed)
+    if err:
+        return None, err
+    if parsed.get("ok") is True:
+        return parsed, None
+    if parsed.get("message_type") == "WALKAWAY":
+        return parsed, None
+    return None, "vendor did not acknowledge WALKAWAY"
+
+
+async def _call_walkaway_with_retry(envelope_json: str, rfq_id: str) -> tuple[str, dict[str, Any] | None, str | None]:
+    """Call vendor for WALKAWAY; retry once on empty reply."""
+    reply = await call_vendor(envelope_json, rfq_id)
+    parsed, err = _parse_walkaway_reply(reply)
+    if parsed is not None or (reply or "").strip():
+        return reply, parsed, err
+    await asyncio.sleep(0.5)
+    reply = await call_vendor(envelope_json, rfq_id)
+    parsed, err = _parse_walkaway_reply(reply)
+    return reply, parsed, err
+
+
+async def _send_walkaway_to_accepted_loser(
+    state: Any,
+    *,
+    vendor_id: str,
+    config: dict[str, Any],
+    nego: dict[str, Any],
+    walkaway_map: dict[str, bool],
+) -> dict[str, Any]:
+    """Phase 1 for accepted-but-not-selected vendors: send a buyer WALKAWAY.
+
+    Mirrors the negotiator's outbound layout — increment round, append the
+    envelope and the vendor's reply to ``communications`` — so that
+    :func:`infer_vendor_thread_status` reports ``WALKED_AWAY`` once both
+    entries land.
+    """
+    rfq_id = str(config.get("rfq_id") or "")
+    if not rfq_id:
+        return {"ok": False, "error": "no rfq_id in negotiation_config"}
+
+    try:
+        round_num = int(config.get("round") or 0) + 1
+    except (TypeError, ValueError):
+        round_num = 1
+
+    # Last accepted price gives the vendor the price we were closing at —
+    # useful context for their own status log even though we're walking away.
+    communications = list(config.get("communications") or [])
+    last_price = _extract_agreed_price(communications)
+
+    builder = _make_builder(config, vendor_id)
+    envelope = builder.get_walkaway_payload(
+        walkaway_reason="ANOTHER_VENDOR_SELECTED",
+        negotiation_round=round_num,
+        last_unit_price=last_price,
+    )
+
+    # Persist the outbound BEFORE the A2A call so a mid-call crash leaves the
+    # buyer-side state consistent with what the vendor saw.
+    communications.append(envelope)
+    config["communications"] = communications
+    config["round"] = round_num
+    nego[vendor_id] = config
+    state[NEGOTIATION_CONFIG_KEY] = nego
+
+    try:
+        reply, parsed, err = await _call_walkaway_with_retry(
+            json.dumps(envelope), rfq_id
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "purchase_manager walkaway_failed  vendor_id=%s error=%s",
+            vendor_id,
+            exc,
+        )
+        return {"ok": False, "error": str(exc)}
+
+    if parsed is None:
+        return {
+            "ok": False,
+            "error": err or "WALKAWAY not acknowledged",
+            "vendor_reply": reply[:500] if isinstance(reply, str) else reply,
+        }
+
+    communications.append(parsed)
+    config["communications"] = communications
+    config["done"] = True
+    nego[vendor_id] = config
+    state[NEGOTIATION_CONFIG_KEY] = nego
+
+    walkaway_map[vendor_id] = True
+    state[WALKAWAY_LOSERS_KEY] = walkaway_map
+
+    logger.info(
+        "purchase_manager walkaway_sent  vendor_id=%s rfq_id=%s round=%s",
+        vendor_id,
+        rfq_id,
+        round_num,
+    )
+    return {"ok": True, "reply": parsed}
+
+
+async def _send_rfq_closed(
+    state: Any,
+    *,
+    vendor_id: str,
+    config: dict[str, Any],
+    closed_map: dict[str, bool],
+) -> dict[str, Any]:
+    """Phase 2: send RFQ_CLOSED to a losing vendor. Does not touch communications."""
+    rfq_id = str(config.get("rfq_id") or "")
+    if not rfq_id:
+        return {"ok": False, "error": "no rfq_id in negotiation_config"}
+
+    try:
+        builder = _make_builder(config, vendor_id)
+        envelope = builder.get_rfq_closed_payload(
+            outcome="NOT_SELECTED",
+            reason="ANOTHER_VENDOR_SELECTED",
+        )
+        reply, parsed, err = await _call_rfq_closed_with_retry(
+            json.dumps(envelope), rfq_id
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "purchase_manager rfq_closed_failed  vendor_id=%s error=%s",
+            vendor_id,
+            exc,
+        )
+        return {"ok": False, "error": str(exc)}
+
+    if parsed is None:
+        return {
+            "ok": False,
+            "error": err or "RFQ_CLOSED not acknowledged",
+            "vendor_reply": reply[:500] if isinstance(reply, str) else reply,
+        }
+
+    closed_map[vendor_id] = True
+    state[RFQ_CLOSED_LOSERS_KEY] = closed_map
+
+    logger.info(
+        "purchase_manager rfq_closed_sent  vendor_id=%s rfq_id=%s",
+        vendor_id,
+        rfq_id,
+    )
+    return {"ok": True, "reply": parsed}
+
+
+async def _notify_losing_vendors(state: Any) -> dict[str, Any]:
+    """Close out every losing vendor before the PO is sent to the winner.
+
+    Two-phase per vendor:
+
+    * If the vendor's last buyer message was ``ACCEPT`` (the buyer accepted
+      their offer but the decision agent then picked a cheaper ACCEPTED vendor),
+      send a buyer ``WALKAWAY`` first so the vendor's thread closes as
+      ``BUYER_WALKED_AWAY`` and the buyer-side status projection reads
+      ``WALKED_AWAY`` instead of ``REJECTED``.
+    * Then send ``RFQ_CLOSED`` to every losing vendor regardless of how their
+      negotiation ended.
+
+    Idempotent per phase: ``walkaway_losers`` and ``rfq_closed_losers`` track
+    each step independently so a mid-flight crash resumes from the right
+    phase without re-sending an already-acked envelope.
     """
     selected_vendor_id = _selected_vendor_id(state)
     if not selected_vendor_id:
@@ -793,54 +1014,60 @@ async def _notify_losing_vendors(state: Any) -> dict[str, Any]:
             "closed": {},
             "note": "all_losing_vendors_already_notified",
             "notified_vendor_ids": sorted(_rfq_closed_losers(state).keys()),
+            "walkaway_vendor_ids": sorted(_walkaway_losers(state).keys()),
         }
 
     nego: dict[str, Any] = dict(state.get(NEGOTIATION_CONFIG_KEY) or {})
     closed_map: dict[str, bool] = dict(_rfq_closed_losers(state))
+    walkaway_map: dict[str, bool] = dict(_walkaway_losers(state))
     results: dict[str, Any] = {}
     pending = [vid for vid in losing_vendor_ids if not closed_map.get(vid)]
 
     for vendor_id in pending:
         config = nego.get(vendor_id) or {}
-        rfq_id = config.get("rfq_id") or ""
-        if not rfq_id:
-            results[vendor_id] = {"ok": False, "error": "no rfq_id in negotiation_config"}
-            continue
-        try:
-            builder = _make_builder(config, vendor_id)
-            envelope = builder.get_rfq_closed_payload(
-                outcome="NOT_SELECTED",
-                reason="ANOTHER_VENDOR_SELECTED",
-            )
-            reply, parsed, err = await _call_rfq_closed_with_retry(
-                json.dumps(envelope),
-                rfq_id,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "purchase_manager rfq_closed_failed  vendor_id=%s error=%s",
-                vendor_id,
-                exc,
-            )
-            results[vendor_id] = {"ok": False, "error": str(exc)}
-            continue
-
-        if parsed is None:
+        if not config.get("rfq_id"):
             results[vendor_id] = {
                 "ok": False,
-                "error": err or "RFQ_CLOSED not acknowledged",
-                "vendor_reply": reply[:500] if isinstance(reply, str) else reply,
+                "error": "no rfq_id in negotiation_config",
             }
             continue
 
-        closed_map[vendor_id] = True
-        state[RFQ_CLOSED_LOSERS_KEY] = closed_map
-        results[vendor_id] = {"ok": True, "reply": parsed}
-        logger.info(
-            "purchase_manager rfq_closed_sent  vendor_id=%s rfq_id=%s",
-            vendor_id,
-            rfq_id,
+        vendor_result: dict[str, Any] = {"ok": True}
+
+        # Phase 1: WALKAWAY first when the buyer's last word was ACCEPT.
+        if _needs_walkaway_before_close(config) and not walkaway_map.get(vendor_id):
+            walk_result = await _send_walkaway_to_accepted_loser(
+                state,
+                vendor_id=vendor_id,
+                config=config,
+                nego=nego,
+                walkaway_map=walkaway_map,
+            )
+            vendor_result["walkaway"] = walk_result
+            if not walk_result.get("ok"):
+                vendor_result["ok"] = False
+                results[vendor_id] = vendor_result
+                continue
+            # Re-read the (possibly mutated) config for Phase 2.
+            config = nego.get(vendor_id) or config
+        elif walkaway_map.get(vendor_id):
+            vendor_result["walkaway"] = {
+                "ok": True,
+                "note": "already_walked_away",
+                "skipped": True,
+            }
+
+        # Phase 2: RFQ_CLOSED for everyone.
+        close_result = await _send_rfq_closed(
+            state,
+            vendor_id=vendor_id,
+            config=config,
+            closed_map=closed_map,
         )
+        vendor_result["rfq_closed"] = close_result
+        if not close_result.get("ok"):
+            vendor_result["ok"] = False
+        results[vendor_id] = vendor_result
 
     for vendor_id in losing_vendor_ids:
         if vendor_id not in results and closed_map.get(vendor_id):
@@ -858,6 +1085,7 @@ async def _notify_losing_vendors(state: Any) -> dict[str, Any]:
         "ok": all_ok,
         "closed": results,
         "notified_vendor_ids": sorted(closed_map.keys()),
+        "walkaway_vendor_ids": sorted(walkaway_map.keys()),
         "all_notified": _all_losing_vendors_notified(state),
     }
 

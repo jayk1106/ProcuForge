@@ -1,31 +1,34 @@
 'use client'
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { forwardRef, useCallback, useImperativeHandle } from 'react'
 import { useRouter } from 'next/navigation'
 import { getVendorThreads } from '@/lib/api-client'
 import type { Vendor } from '@/types'
+import { useInfinitePagedList } from '@/hooks/useInfinitePagedList'
+import { InfiniteScrollSentinel } from '@/components/primitives/InfiniteScrollSentinel'
 import { StateLabel } from './StateLabel'
 
-export function VendorsTable() {
+const PAGE_SIZE = 25
+
+export interface VendorsTableHandle {
+  refresh: () => void
+}
+
+export const VendorsTable = forwardRef<VendorsTableHandle>(function VendorsTable(
+  _props,
+  ref,
+) {
   const router = useRouter()
-  const [rows, setRows] = useState<Vendor[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      setRows(await getVendorThreads())
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load vendor threads')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const fetcher = useCallback(
+    ({ cursor }: { cursor?: string | null; filter: Record<string, never> }) =>
+      getVendorThreads({ cursor: cursor ?? undefined, limit: PAGE_SIZE }),
+    [],
+  )
 
-  useEffect(() => {
-    load()
-  }, [load])
+  const { items, loading, loadingMore, error, hasMore, loadMore, refresh } =
+    useInfinitePagedList<Vendor, Record<string, never>>(fetcher, {})
+
+  useImperativeHandle(ref, () => ({ refresh }), [refresh])
 
   if (loading) {
     return (
@@ -35,80 +38,103 @@ export function VendorsTable() {
     )
   }
 
-  if (error) {
+  if (error && items.length === 0) {
     return (
       <div className="empty" style={{ marginTop: 24 }}>
         <pre className="ascii-mark">──── error ────</pre>
         <div>{error}</div>
-        <button className="btn" style={{ marginTop: 12 }} onClick={load}>
+        <button className="btn" style={{ marginTop: 12 }} onClick={refresh}>
           [ retry ]
         </button>
       </div>
     )
   }
 
+  if (items.length === 0) {
+    return (
+      <div className="empty" style={{ marginTop: 24 }}>
+        <pre className="ascii-mark">──── no vendor threads ────</pre>
+        <div>No vendor threads yet. Threads appear when negotiation starts.</div>
+      </div>
+    )
+  }
+
   return (
     <>
-      <div className="toolbar">
-        <div className="toolbar-inner">
-          <div className="spacer" />
-          <button className="btn" onClick={load}>
-            [ refresh ]
-          </button>
-        </div>
-      </div>
-
-      {rows.length === 0 ? (
-        <div className="empty" style={{ marginTop: 24 }}>
-          <pre className="ascii-mark">──── no vendor threads ────</pre>
-          <div>No vendor threads yet. Threads appear when negotiation starts.</div>
-        </div>
-      ) : (
-        <table className="table" style={{ marginTop: 4 }}>
-          <thead>
-            <tr>
-              <th style={{ width: 110 }}>Vendor ID</th>
-              <th>Vendor</th>
-              <th style={{ width: 150 }}>Related PR</th>
-              <th style={{ width: 200 }}>State</th>
-              <th style={{ width: 130 }}>Last activity</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((v) => (
-              <tr
-                key={v.id}
-                className={v.unread > 0 ? 'action-row' : ''}
-                onClick={() => router.push(`/vendors/${v.id}`)}
+      <table className="table" style={{ marginTop: 4, tableLayout: 'fixed' }}>
+        <colgroup>
+          <col style={{ width: '12%' }} />
+          <col style={{ width: '32%' }} />
+          <col style={{ width: '20%' }} />
+          <col style={{ width: '22%' }} />
+          <col style={{ width: '14%' }} />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>Vendor ID</th>
+            <th>Vendor</th>
+            <th>Related PR</th>
+            <th>Status</th>
+            <th>Last activity</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((v) => (
+            <tr
+              key={v.id}
+              className={v.unread > 0 ? 'action-row' : ''}
+              onClick={() => router.push(`/vendors/${v.id}`)}
+            >
+              <td
+                className="tnum"
+                title={v.vendorId ?? v.id}
+                style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
               >
-                <td className="tnum">{v.vendorId ?? v.id.slice(0, 8)}</td>
-                <td>
-                  <div>{v.name}</div>
-                  <div className="t-xs faint">
-                    {v.country} · {v.tier}
-                  </div>
-                </td>
-                <td className="tnum">
-                  <a
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      router.push(`/flows/${v.workflowId ?? v.pr}`)
-                    }}
-                  >
-                    {v.pr}
-                  </a>
-                </td>
-                <td>
-                  <StateLabel s={v.state} />
-                </td>
-                <td className="t-xs muted">{v.last}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+                {(v.vendorId ?? v.id).slice(0, 8)}
+              </td>
+              <td>
+                <div>{v.name}</div>
+                <div className="t-xs faint">
+                  {v.country} · {v.tier}
+                </div>
+              </td>
+              <td className="tnum">
+                <a
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    router.push(`/flows/${v.workflowId ?? v.pr}`)
+                  }}
+                >
+                  {v.pr}
+                </a>
+              </td>
+              <td>
+                <StateLabel s={v.state} />
+              </td>
+              <td className="t-xs muted">{v.last}</td>
+            </tr>
+          ))}
+          {hasMore && (
+            <tr>
+              <td colSpan={5} style={{ padding: 0, border: 'none' }}>
+                <InfiniteScrollSentinel
+                  onVisible={loadMore}
+                  disabled={loadingMore || !hasMore}
+                />
+              </td>
+            </tr>
+          )}
+          {loadingMore && (
+            <tr>
+              <td colSpan={5} className="t-xs muted" style={{ textAlign: 'center', padding: 12 }}>
+                loading more…
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
 
       <div style={{ height: 80 }} />
     </>
   )
-}
+})

@@ -38,6 +38,11 @@ PENDING_APPROVAL_KEY = "pending_approval"
 
 # Losing vendors notified with RFQ_CLOSED (vendor_id -> True); idempotent send guard
 RFQ_CLOSED_LOSERS_KEY = "rfq_closed_losers"
+# Losing vendors that accepted the buyer's offer but were not selected — sent a
+# WALKAWAY first so the vendor side closes their thread as BUYER_WALKED_AWAY.
+# Shape: { vendor_id: True }. Tracked separately from RFQ_CLOSED_LOSERS_KEY so a
+# mid-retry can resume Phase 2 (RFQ_CLOSED) without re-sending the WALKAWAY.
+WALKAWAY_LOSERS_KEY = "walkaway_losers"
 
 # Purchase stall detection: snapshot at start of each purchase_manager turn
 PURCHASE_STEP_SNAPSHOT_KEY = "purchase_step_snapshot"

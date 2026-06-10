@@ -43,6 +43,20 @@ class VendorThreadRowDTO(BaseModel):
     done: bool = False
 
 
+class PagedWorkflowRows(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+    items: list[WorkflowRowDTO]
+    next_cursor: str | None = Field(default=None, alias="nextCursor")
+
+
+class PagedVendorThreadRows(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+    items: list[VendorThreadRowDTO]
+    next_cursor: str | None = Field(default=None, alias="nextCursor")
+
+
 class VendorThreadMessageDTO(BaseModel):
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 

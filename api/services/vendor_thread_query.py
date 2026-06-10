@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from api.services.state_projection import ProjectionPayload
 
 from api.config import APISettings
-from api.schemas.ui_dto import VendorConvoDTO, VendorThreadRowDTO
+from api.schemas.ui_dto import PagedVendorThreadRows, VendorConvoDTO, VendorThreadRowDTO
 from api.schemas.vendor_thread_status import VendorThreadStatus
 from api.services.session_reader import BuyerSessionReader, VendorSessionReader
 from api.services.ui_mappers import vendor_convo_from_state
@@ -67,7 +67,13 @@ class VendorThreadQueryService:
                 detail=f"Vendor thread runtime is not configured. Missing: {', '.join(missing)}",
             )
 
-    async def list_threads(self, organization_id: str | None = None) -> list[VendorThreadRowDTO]:
+    async def list_threads(
+        self,
+        organization_id: str | None = None,
+        *,
+        limit: int = 25,
+        cursor: str | None = None,
+    ) -> PagedVendorThreadRows:
         self._ensure_configured()
         org = organization_id or self._settings.workflow_default_organization_id
         if not org:
@@ -76,7 +82,9 @@ class VendorThreadQueryService:
                 detail="organization_id is required.",
             )
 
-        docs = await self._thread_state_repo.list_by_org(org)
+        docs, next_cursor = await self._thread_state_repo.list_by_org(
+            org, limit=limit, cursor=cursor,
+        )
         # Names fall back to a per-org vendor lookup only for docs that were
         # projected before ``vendorName`` was populated. Skipping when present
         # avoids an extra Firestore read on the hot path.
@@ -84,7 +92,8 @@ class VendorThreadQueryService:
         name_lookup = (
             await self._vendor_repo.get_many(missing_names) if missing_names else {}
         )
-        return [_row_from_thread_doc(d, name_lookup) for d in docs]
+        items = [_row_from_thread_doc(d, name_lookup) for d in docs]
+        return PagedVendorThreadRows(items=items, nextCursor=next_cursor)
 
     async def get_thread(self, rfq_id: str) -> VendorConvoDTO:
         self._ensure_configured()
@@ -96,27 +105,31 @@ class VendorThreadQueryService:
                 detail=f"Vendor thread '{rfq_id}' not found.",
             )
 
-        # The detail page renders from the assembled DTO. Project from the
-        # stored vendor state plus the optional buyer override embedded in the
-        # doc; fall back to assembling from the live Vertex session if the
-        # stored state hasn't been written yet (transient race during first
-        # vendor turn).
-        assembled = await _assemble_vendor_convo(
+        state = doc.state if isinstance(doc.state, dict) else {}
+        override = state.get("buyerOverride") if isinstance(state.get("buyerOverride"), dict) else None
+
+        vendor_doc = await self._vendor_repo.get(doc.vendor_id)
+
+        product_doc = None
+        product = state.get("product") if isinstance(state.get("product"), dict) else {}
+        product_id = str(product.get("id") or "") if isinstance(product, dict) else ""
+        if product_id and self._product_repo is not None:
+            try:
+                product_doc = await self._product_repo.get(product_id)
+            except Exception:  # noqa: BLE001 — soft-fail; UI falls back to SKU/id from state
+                product_doc = None
+
+        events = await self._events_repo.list_for_vendor_thread(doc.workflow_id, rfq_id)
+
+        return vendor_convo_from_state(
             rfq_id,
+            state,
             workflow_id=doc.workflow_id,
-            vendor_id=doc.vendor_id,
-            vendor_reader=self._vendor_reader,
-            buyer_reader=self._buyer_reader,
-            vendor_repo=self._vendor_repo,
-            product_repo=self._product_repo,
-            events_repo=self._events_repo,
+            vendor_doc=vendor_doc,
+            product_doc=product_doc,
+            events=events,
+            override=override,
         )
-        if assembled is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Vendor session for rfq '{rfq_id}' not found.",
-            )
-        return assembled.dto
 
     async def get_thread_state(self, rfq_id: str) -> dict:
         """Return raw vendor and buyer session state for debugging."""
@@ -292,26 +305,6 @@ def _override_for_rfq(buyer_state: dict, rfq_id: str) -> dict | None:
     return entry if isinstance(entry, dict) else None
 
 
-_VENDOR_STATUS_TO_LABEL: dict[str, str] = {
-    "RFQ_RECEIVED": "NEGOTIATING",
-    "QUOTE_SENT": "NEGOTIATING",
-    "NEGOTIATION_IN_PROGRESS": "NEGOTIATING",
-    "INITIATING": "NEGOTIATING",
-    "ACCEPTED": "CLOSED",
-    "PO_RECEIVED": "CLOSED",
-    "PO_ACKNOWLEDGED": "CLOSED",
-    "GRN_RECEIVED": "CLOSED",
-    "INVOICE_SUBMITTED": "CLOSED",
-    "COMPLETE": "CLOSED",
-    "RFQ_CLOSED": "CLOSED",
-    "VENDOR_WALKED_AWAY": "WALKED_AWAY",
-    "BUYER_WALKED_AWAY": "WALKED_AWAY",
-    # Buyer-side overrides.
-    "ESCALATED": "ESCALATED",
-    "WALKED_AWAY": "WALKED_AWAY",
-}
-
-
 def _row_from_thread_doc(
     doc: VendorThreadStateDoc,
     name_lookup: dict,
@@ -319,15 +312,15 @@ def _row_from_thread_doc(
     """Map a stored vendor-thread state doc to the wire DTO the UI consumes.
 
     Names are resolved from ``name_lookup`` only for docs whose ``vendorName``
-    was never populated (legacy or pre-rollout writes).
+    was never populated (legacy or pre-rollout writes). ``status`` mirrors the
+    raw vendor-session status (overrides already applied during projection) so
+    the list pill matches the detail page's summary card.
     """
     from api.services.ui_mappers import _format_relative
 
     name = doc.vendor_name or (
         (lookup_entry := name_lookup.get(doc.vendor_id)) and lookup_entry.name
     ) or doc.vendor_id
-
-    label = _VENDOR_STATUS_TO_LABEL.get(doc.status, "NEGOTIATING")
 
     return VendorThreadRowDTO(
         id=doc.rfq_id,
@@ -338,7 +331,7 @@ def _row_from_thread_doc(
         pr=doc.request_id or doc.workflow_id,
         workflowId=doc.workflow_id,
         last=_format_relative(doc.updated_at.isoformat()),
-        state=label,
+        state=doc.status or "UNKNOWN",
         unread=0,
         msgs=doc.message_count,
         round=doc.round if doc.round else None,

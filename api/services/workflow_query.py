@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException, status
 
 from api.config import APISettings
-from api.schemas.ui_dto import WorkflowDetailDTO, WorkflowRowDTO
+from api.schemas.ui_dto import PagedWorkflowRows, WorkflowDetailDTO, WorkflowRowDTO
 from api.services.session_reader import BuyerSessionReader
 from api.services.status_mapping import (
     action_label,
@@ -26,6 +26,23 @@ from procu_forge_buyer.state_keys import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+_STATUS_FILTER_MAP: dict[str, str] = {
+    "all": "",
+    "progress": "IN_PROGRESS",
+    "action": "NEEDS_ACTION",
+    "completed": "DONE",
+    "walked": "WALKED",
+}
+
+
+def _map_status_filter(value: str | None) -> str | None:
+    """Translate the public API status param into the repo-level filter token."""
+    if not value or value == "all":
+        return None
+    mapped = _STATUS_FILTER_MAP.get(value)
+    return mapped or None
 
 
 class WorkflowQueryService:
@@ -49,7 +66,14 @@ class WorkflowQueryService:
                 detail="Buyer workflow runtime is not configured.",
             )
 
-    async def list_workflows(self, organization_id: str | None = None) -> list[WorkflowRowDTO]:
+    async def list_workflows(
+        self,
+        organization_id: str | None = None,
+        *,
+        limit: int = 25,
+        cursor: str | None = None,
+        status_filter: str | None = None,
+    ) -> PagedWorkflowRows:
         self._ensure_configured()
         org = organization_id or self._settings.workflow_default_organization_id
         if not org:
@@ -57,9 +81,13 @@ class WorkflowQueryService:
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="organization_id is required.",
             )
-        docs = await self._state_repo.list_by_org(org)
+
+        repo_filter = _map_status_filter(status_filter)
+        docs, next_cursor = await self._state_repo.list_by_org(
+            org, limit=limit, cursor=cursor, status_filter=repo_filter,
+        )
         now = datetime.now(timezone.utc)
-        return [
+        items = [
             WorkflowRowDTO(
                 id=d.workflow_id,
                 requestId=d.request_id,
@@ -86,6 +114,7 @@ class WorkflowQueryService:
             )
             for d in docs
         ]
+        return PagedWorkflowRows(items=items, nextCursor=next_cursor)
 
     async def get_workflow(self, workflow_id: str) -> WorkflowDetailDTO:
         self._ensure_configured()

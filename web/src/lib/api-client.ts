@@ -67,8 +67,30 @@ export async function searchProducts(q = '', limit = 20): Promise<ProductOption[
   return apiFetch<ProductOption[]>(`/api/v1/products${query ? `?${query}` : ''}`)
 }
 
-export async function getWorkflows(): Promise<WorkflowRow[]> {
-  return apiFetch<WorkflowRow[]>('/api/v1/workflow/list')
+export type WorkflowStatusFilter = 'all' | 'progress' | 'action' | 'completed' | 'walked'
+
+export interface PagedRows<T> {
+  items: T[]
+  nextCursor: string | null
+}
+
+export interface ListWorkflowsOptions {
+  cursor?: string | null
+  limit?: number
+  status?: WorkflowStatusFilter
+}
+
+export async function getWorkflows(
+  opts: ListWorkflowsOptions = {},
+): Promise<PagedRows<WorkflowRow>> {
+  const params = new URLSearchParams()
+  if (opts.cursor) params.set('cursor', opts.cursor)
+  if (opts.limit) params.set('limit', String(opts.limit))
+  if (opts.status && opts.status !== 'all') params.set('status', opts.status)
+  const query = params.toString()
+  return apiFetch<PagedRows<WorkflowRow>>(
+    `/api/v1/workflow/list${query ? `?${query}` : ''}`,
+  )
 }
 
 export async function getWorkflowDetail(id: string): Promise<ActiveFlow> {
@@ -152,8 +174,21 @@ export async function askWorkflow(
   })
 }
 
-export async function getVendorThreads(): Promise<Vendor[]> {
-  return apiFetch<Vendor[]>('/api/v1/vendor-threads')
+export interface ListVendorThreadsOptions {
+  cursor?: string | null
+  limit?: number
+}
+
+export async function getVendorThreads(
+  opts: ListVendorThreadsOptions = {},
+): Promise<PagedRows<Vendor>> {
+  const params = new URLSearchParams()
+  if (opts.cursor) params.set('cursor', opts.cursor)
+  if (opts.limit) params.set('limit', String(opts.limit))
+  const query = params.toString()
+  return apiFetch<PagedRows<Vendor>>(
+    `/api/v1/vendor-threads${query ? `?${query}` : ''}`,
+  )
 }
 
 export async function getVendorThread(rfqId: string): Promise<VendorConvo> {

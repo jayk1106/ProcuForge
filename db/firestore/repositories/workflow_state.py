@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from typing import Any
 
 from google.cloud import firestore
 
 from db.collections.workflow_state import COLLECTION_ID, WorkflowStateDoc
+from db.firestore.pagination import decode_cursor, encode_cursor
 from db.firestore.serialization import (
     merge_update_dict,
     model_to_firestore_dict,
     snapshot_to_model_dict,
 )
+
+_VALID_PHASE_GROUPS = {"IN_PROGRESS", "DONE", "WALKED"}
 
 
 class WorkflowStateRepository:
@@ -53,20 +57,58 @@ class WorkflowStateRepository:
         self,
         organization_id: str,
         *,
-        limit: int = 100,
-    ) -> list[WorkflowStateDoc]:
-        def _op() -> list[WorkflowStateDoc]:
+        limit: int = 25,
+        cursor: str | None = None,
+        status_filter: str | None = None,
+    ) -> tuple[list[WorkflowStateDoc], str | None]:
+        """Cursor-paginated list ordered by ``startedAt`` DESC.
+
+        ``status_filter`` accepts ``"IN_PROGRESS" | "DONE" | "WALKED"``
+        (filters on the denormalized ``phaseGroup`` field) or
+        ``"NEEDS_ACTION"`` (filters on the ``needsAction`` boolean).
+        ``cursor`` is an opaque token issued by a prior call; pass ``None``
+        for the first page. Returns ``(items, next_cursor)``.
+        """
+        def _op() -> tuple[list[WorkflowStateDoc], str | None]:
+            query = self._collection.where("organizationId", "==", organization_id)
+
+            if status_filter == "NEEDS_ACTION":
+                query = query.where("needsAction", "==", True)
+            elif status_filter in _VALID_PHASE_GROUPS:
+                query = query.where("phaseGroup", "==", status_filter)
+
             query = (
-                self._collection
-                .where("organizationId", "==", organization_id)
-                .limit(limit)
+                query
+                .order_by("startedAt", direction=firestore.Query.DESCENDING)
+                .order_by("__name__", direction=firestore.Query.ASCENDING)
             )
+
+            if cursor:
+                decoded = decode_cursor(cursor)
+                if decoded and len(decoded) == 2:
+                    started_at_iso, doc_id = decoded
+                    try:
+                        started_at = datetime.fromisoformat(str(started_at_iso))
+                    except ValueError:
+                        started_at = None
+                    if started_at is not None:
+                        query = query.start_after({"startedAt": started_at, "__name__": str(doc_id)})
+
+            query = query.limit(limit + 1)
+
             rows: list[WorkflowStateDoc] = []
             for snap in query.stream():
                 body = snapshot_to_model_dict(snap.id, snap.to_dict())
                 rows.append(WorkflowStateDoc.model_validate(body))
-            rows.sort(key=lambda d: d.started_at, reverse=True)
-            return rows
+
+            has_more = len(rows) > limit
+            if has_more:
+                rows = rows[:limit]
+            next_cursor: str | None = None
+            if has_more and rows:
+                last = rows[-1]
+                next_cursor = encode_cursor([last.started_at.isoformat(), last.id])
+            return rows, next_cursor
 
         return await asyncio.to_thread(_op)
 

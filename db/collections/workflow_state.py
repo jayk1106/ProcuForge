@@ -27,6 +27,7 @@ class WorkflowStateDoc(FirestoreBaseModel):
     product_name: str = Field(alias="productName")
     requester_id: str = Field(alias="requesterId")
     pr_status: str = Field(alias="prStatus")
+    phase_group: str = Field(default="IN_PROGRESS", alias="phaseGroup")
     started_at: datetime = Field(alias="startedAt")
     updated_at: datetime = Field(alias="updatedAt")
     vendor_count: int = Field(default=0, alias="vendorCount")

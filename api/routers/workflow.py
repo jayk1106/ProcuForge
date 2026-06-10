@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 
@@ -11,7 +11,13 @@ from api.dependencies import (
     WorkflowServiceDep,
     get_current_admin,
 )
-from api.schemas.ui_dto import VendorConvoDTO, VendorThreadRowDTO, WorkflowDetailDTO, WorkflowRowDTO
+from api.schemas.ui_dto import (
+    PagedWorkflowRows,
+    VendorConvoDTO,
+    VendorThreadRowDTO,
+    WorkflowDetailDTO,
+    WorkflowRowDTO,
+)
 from api.schemas.workflow import WorkflowApproveResponse, WorkflowResolveEscalationResponse, WorkflowStartRequest, WorkflowStartResponse
 from api.schemas.workflow_chat import WorkflowAskRequest, WorkflowAskResponse
 
@@ -24,14 +30,21 @@ router = APIRouter(
 
 @router.get(
     "/list",
-    response_model=list[WorkflowRowDTO],
-    summary="List procurement workflows",
+    response_model=PagedWorkflowRows,
+    summary="List procurement workflows (cursor-paginated)",
 )
 async def list_workflows(
     service: WorkflowQueryServiceDep,
     organization_id: str | None = Query(default=None, alias="organizationId"),
-) -> list[WorkflowRowDTO]:
-    return await service.list_workflows(organization_id)
+    limit: int = Query(default=25, ge=1, le=100),
+    cursor: str | None = Query(default=None),
+    status_filter: Literal["all", "progress", "action", "completed", "walked"] = Query(
+        default="all", alias="status",
+    ),
+) -> PagedWorkflowRows:
+    return await service.list_workflows(
+        organization_id, limit=limit, cursor=cursor, status_filter=status_filter,
+    )
 
 
 @router.get(

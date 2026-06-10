@@ -4,7 +4,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 from pydantic import BaseModel
 
 from api.dependencies import VendorThreadQueryServiceDep, get_current_admin
-from api.schemas.ui_dto import VendorConvoDTO, VendorThreadRowDTO
+from api.schemas.ui_dto import PagedVendorThreadRows, VendorConvoDTO, VendorThreadRowDTO
 
 router = APIRouter(
     prefix="/vendor-threads",
@@ -27,14 +27,16 @@ class ThreadActionResponse(BaseModel):
 
 @router.get(
     "",
-    response_model=list[VendorThreadRowDTO],
-    summary="List all vendor negotiation threads",
+    response_model=PagedVendorThreadRows,
+    summary="List all vendor negotiation threads (cursor-paginated)",
 )
 async def list_vendor_threads(
     service: VendorThreadQueryServiceDep,
     organization_id: str | None = Query(default=None, alias="organizationId"),
-) -> list[VendorThreadRowDTO]:
-    return await service.list_threads(organization_id)
+    limit: int = Query(default=25, ge=1, le=100),
+    cursor: str | None = Query(default=None),
+) -> PagedVendorThreadRows:
+    return await service.list_threads(organization_id, limit=limit, cursor=cursor)
 
 
 @router.get(
