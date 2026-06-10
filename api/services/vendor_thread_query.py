@@ -155,16 +155,6 @@ class VendorThreadQueryService:
             "resolved": {"workflow_id": workflow_id, "vendor_id": vendor_id, "rfq_id": rfq_id},
         }
 
-    async def escalate(self, rfq_id: str, reason: str | None = None) -> dict:
-        return await self._apply_override(
-            rfq_id,
-            status=VendorThreadStatus.ESCALATED,
-            reason=reason,
-            event_type="vendor_thread_escalated",
-            api_author="api:escalate",
-            broadcast_reason="override_escalate",
-        )
-
     async def walk_away(self, rfq_id: str, reason: str | None = None) -> dict:
         return await self._apply_override(
             rfq_id,

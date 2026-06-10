@@ -207,19 +207,6 @@ export async function getVendorThreadState(rfqId: string): Promise<Record<string
   return apiFetch<Record<string, unknown>>(`/api/v1/vendor-threads/${rfqId}/state`)
 }
 
-export async function escalateVendorThread(
-  rfqId: string,
-  reason?: string
-): Promise<ThreadActionResponse> {
-  return apiFetch<ThreadActionResponse>(
-    `/api/v1/vendor-threads/${rfqId}/escalate`,
-    {
-      method: 'POST',
-      body: JSON.stringify({ reason: reason ?? null }),
-    }
-  )
-}
-
 export async function walkAwayVendorThread(
   rfqId: string,
   reason?: string

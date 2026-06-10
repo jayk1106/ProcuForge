@@ -194,10 +194,6 @@ class WorkflowService:
             # top-level state_delta on the events we observed.
             _emit_state("runner_complete")
             logger.info("workflow.run.complete workflow_id=%s", job.workflow_id)
-
-            from api.services.escalation_notifications import schedule_notify_if_pending
-
-            schedule_notify_if_pending(job.workflow_id)
         except Exception:
             logger.exception(
                 "workflow.run.failed workflow_id=%s",

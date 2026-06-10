@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel
 
 from api.dependencies import VendorThreadQueryServiceDep, get_current_admin
@@ -61,31 +61,6 @@ async def get_vendor_thread(
     service: VendorThreadQueryServiceDep,
 ) -> VendorConvoDTO:
     return await service.get_thread(rfq_id)
-
-
-@router.post(
-    "/{rfq_id}/escalate",
-    response_model=ThreadActionResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-    summary="Mark a vendor thread as ESCALATED for human review",
-    responses={404: {"description": "Vendor thread not found."}},
-)
-async def escalate_vendor_thread(
-    rfq_id: str,
-    service: VendorThreadQueryServiceDep,
-    background_tasks: BackgroundTasks,
-    body: ThreadActionRequest | None = None,
-) -> ThreadActionResponse:
-    reason = body.reason if body else None
-    result = await service.escalate(rfq_id, reason)
-    background_tasks.add_task(_notify_escalation, result["workflow_id"])
-    return ThreadActionResponse(**result)
-
-
-def _notify_escalation(workflow_id: str) -> None:
-    from api.services.escalation_notifications import schedule_notify_if_pending
-
-    schedule_notify_if_pending(workflow_id)
 
 
 @router.post(

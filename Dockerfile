@@ -2,8 +2,13 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
+# Node 20 + Mailgun MCP server pre-installed so the escalation_notifier subagent
+# can launch `@mailgun/mcp-server` over stdio without a first-run npx fetch.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
+    && apt-get install -y --no-install-recommends curl ca-certificates gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && npm install -g @mailgun/mcp-server@latest \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
