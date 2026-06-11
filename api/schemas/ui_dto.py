@@ -15,7 +15,7 @@ class WorkflowRowDTO(BaseModel):
     product: str
     requested_by: str = Field(alias="requestedBy")
     requested_at: str = Field(alias="requestedAt")
-    phase: Literal["RFQ", "NEG", "PO", "GRN", "INV", "DONE"]
+    phase: Literal["RFQ", "NEG", "VEND", "PO", "GRN", "INV", "DONE"]
     current_state: str = Field(alias="currentState")
     vendors: int
     days: int

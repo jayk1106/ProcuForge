@@ -1,6 +1,6 @@
 import type { PhaseLabel } from '@/types/workflow'
 
-const PHASES: PhaseLabel[] = ['RFQ', 'NEG', 'PO', 'GRN', 'INV', 'DONE']
+const PHASES: PhaseLabel[] = ['RFQ', 'NEG', 'VEND', 'PO', 'GRN', 'INV', 'DONE']
 
 // API still returns 'RFQ' for the first phase for backwards compatibility,
 // but the user-facing label is the vendor-discovery step (RFQs are sent
@@ -8,6 +8,7 @@ const PHASES: PhaseLabel[] = ['RFQ', 'NEG', 'PO', 'GRN', 'INV', 'DONE']
 const PHASE_DISPLAY_LABEL: Record<PhaseLabel, string> = {
   RFQ: 'DISC',
   NEG: 'NEG',
+  VEND: 'VEND',
   PO: 'PO',
   GRN: 'GRN',
   INV: 'INV',

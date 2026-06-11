@@ -149,6 +149,7 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
       flow?.phaseStatus ?? {
         rfq: 'pending',
         neg: 'pending',
+        vendor: 'pending',
         po: 'pending',
         grn: 'pending',
         inv: 'pending',

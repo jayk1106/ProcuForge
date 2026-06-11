@@ -58,12 +58,15 @@ def pr_status_to_phase_label(status: PrStatus) -> PhaseLabel:
     if status in {
         PrStatus.NEGOTIATION_IN_PROGRESS,
         PrStatus.NEGOTIATION_COMPLETED,
-        PrStatus.VENDOR_SELECTED,
         PrStatus.NO_VENDOR_AVAILABLE,
     }:
         return "NEG"
     if status in {
+        PrStatus.VENDOR_SELECTED,
         PrStatus.AWAITING_USER_APPROVAL,
+    }:
+        return "VEND"
+    if status in {
         PrStatus.AWAITING_PO_APPROVAL,
         PrStatus.PO_ISSUED,
         PrStatus.PO_ACKNOWLEDGED,
@@ -102,6 +105,7 @@ def pr_status_to_phase_id(status: PrStatus) -> PhaseId:
     mapping = {
         "RFQ": "rfq",
         "NEG": "neg",
+        "VEND": "vendor",
         "PO": "po",
         "GRN": "grn",
         "INV": "inv",
@@ -180,7 +184,7 @@ def is_in_progress(status: PrStatus) -> bool:
 
 PhaseStatus = str  # pending | in_progress | done | walked
 
-PHASE_ORDER: tuple[PhaseId, ...] = ("rfq", "neg", "po", "grn", "inv", "done")
+PHASE_ORDER: tuple[PhaseId, ...] = ("rfq", "neg", "vendor", "po", "grn", "inv", "done")
 
 
 def phase_status_map(status: PrStatus) -> dict[PhaseId, PhaseStatus]:
@@ -209,17 +213,22 @@ def phase_status_map(status: PrStatus) -> dict[PhaseId, PhaseStatus]:
         result = {p: "pending" for p in PHASE_ORDER}
         result["rfq"] = "done"
         result["neg"] = "done"
+        result["vendor"] = "done"
         result["po"] = "walked"
         return result
 
-    # Negotiation rounds are over and the workflow is moving toward PO. Mark
-    # neg as done so the timeline/section pill reflects completion instead of
-    # sitting at "in progress" until PO_ISSUED lands.
-    if status in {PrStatus.NEGOTIATION_COMPLETED, PrStatus.VENDOR_SELECTED}:
+    # Negotiation rounds are over and a vendor has been (or is being) selected.
+    # Advance to the vendor pill — it owns the in-progress state until PO work
+    # actually starts (AWAITING_PO_APPROVAL / PO_ISSUED).
+    if status in {
+        PrStatus.NEGOTIATION_COMPLETED,
+        PrStatus.VENDOR_SELECTED,
+        PrStatus.AWAITING_USER_APPROVAL,
+    }:
         result = {p: "pending" for p in PHASE_ORDER}
         result["rfq"] = "done"
         result["neg"] = "done"
-        result["po"] = "in_progress"
+        result["vendor"] = "in_progress"
         return result
 
     current = pr_status_to_phase_id(status)

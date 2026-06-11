@@ -1,4 +1,4 @@
-export type PhaseLabel = 'RFQ' | 'NEG' | 'PO' | 'GRN' | 'INV' | 'DONE'
+export type PhaseLabel = 'RFQ' | 'NEG' | 'VEND' | 'PO' | 'GRN' | 'INV' | 'DONE'
 export type FilterTab = 'ALL' | 'IN_PROGRESS' | 'NEEDS_ACTION' | 'COMPLETED' | 'WALKED_AWAY'
 
 export interface WorkflowRow {

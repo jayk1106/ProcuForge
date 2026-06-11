@@ -4,7 +4,7 @@ export interface Phase {
   long: string
 }
 
-export type PhaseId = 'rfq' | 'neg' | 'po' | 'grn' | 'inv' | 'done' | 'walked'
+export type PhaseId = 'rfq' | 'neg' | 'vendor' | 'po' | 'grn' | 'inv' | 'done' | 'walked'
 
 export interface Flow {
   id: string
