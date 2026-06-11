@@ -10,8 +10,6 @@ There are three runtime surfaces:
 | Google Cloud Run | FastAPI + WebSockets + vendor A2A loopback (single container) | `scripts/setup_cloud_run_once.sh`, `scripts/deploy_cloud_run.sh` |
 | Vercel | Next.js frontend (`web/`) | Vercel dashboard / `vercel` CLI |
 
-For deeper reference material see [`deployment.md`](./deployment.md) (Agent Engine internals), [`cloud_run_deployment.md`](./cloud_run_deployment.md) (Cloud Run runbook), and [`production_setup_guide.md`](./production_setup_guide.md) (auth and CORS background).
-
 ---
 
 ## Prerequisites
@@ -315,8 +313,8 @@ Restart from Step 1. Reasoning engine IDs, the Cloud Run service URL, and the Ar
 | `Missing required variables` on `deploy_cloud_run.sh` | Fill the blank(s) in `.env.production` reported by the script |
 | `Set API_CORS_ORIGINS to your real Vercel URL` | Replace the `your-app.vercel.app` placeholder |
 | `Set BUYER_REASONING_ENGINE...` | Run `deploy_buyer.py` / `deploy_vendor.py`, or set `SYNC_REASONING_ENGINES_FROM_LOGS=true` |
-| `/health/ready` returns 503 | See [`cloud_run_deployment.md`](./cloud_run_deployment.md#health-ready-returns-503) |
+| `/health/ready` returns 503 | Inspect the JSON `detail` field; usually `BUYER_REASONING_ENGINE` / `VENDOR_REASONING_ENGINE` or Firestore IAM |
 | CORS error in browser | `API_CORS_ORIGINS` must match the browser origin exactly (`https://`, no trailing slash) — then redeploy |
 | Login works but API returns 401 | `NEXT_PUBLIC_API_URL` on Vercel must match the Cloud Run hostname |
 
-For everything else, see [`cloud_run_deployment.md`](./cloud_run_deployment.md) (troubleshooting section) and [`production_setup_guide.md`](./production_setup_guide.md) (auth and CORS background).
+For auth specifics, see [`authentication.md`](./authentication.md).

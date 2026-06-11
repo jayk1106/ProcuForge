@@ -28,6 +28,7 @@ function buildSections(flow: ActiveFlow | null | undefined, isEmpty: boolean): N
   const ps: Record<string, PhaseStatus> = flow?.phaseStatus ?? {
     rfq: 'pending',
     neg: 'pending',
+    vendor: 'pending',
     po: 'pending',
     grn: 'pending',
     inv: 'pending',

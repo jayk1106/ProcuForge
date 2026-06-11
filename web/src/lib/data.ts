@@ -4,12 +4,13 @@ export const PHASES: Phase[] = [
   // Phase id stays 'rfq' for backwards compatibility with the backend phase
   // mapping; the user-facing label reflects what actually happens in this
   // phase — vendor discovery. RFQs go out during NEG.
-  { id: 'rfq',  label: 'DISC', long: 'Vendor Discovery' },
-  { id: 'neg',  label: 'NEG',  long: 'Negotiation' },
-  { id: 'po',   label: 'PO',   long: 'Purchase Order' },
-  { id: 'grn',  label: 'GRN',  long: 'Goods Receipt' },
-  { id: 'inv',  label: 'INV',  long: 'Invoice Match' },
-  { id: 'done', label: 'DONE', long: 'Complete' },
+  { id: 'rfq',    label: 'DISC', long: 'Vendor Discovery' },
+  { id: 'neg',    label: 'NEG',  long: 'Negotiation' },
+  { id: 'vendor', label: 'VEND', long: 'Vendor Selection' },
+  { id: 'po',     label: 'PO',   long: 'Purchase Order' },
+  { id: 'grn',    label: 'GRN',  long: 'Goods Receipt' },
+  { id: 'inv',    label: 'INV',  long: 'Invoice Match' },
+  { id: 'done',   label: 'DONE', long: 'Complete' },
 ]
 
 export const FLOWS: Flow[] = [
@@ -142,6 +143,7 @@ export const ACTIVE_FLOW: ActiveFlow = {
   phaseDurations: {
     rfq: '1d 04h',
     neg: '5d 18h',
+    vendor: null,
     po: null,
     grn: null,
     inv: null,
