@@ -1,6 +1,6 @@
 # ProcuForge — End-to-End Architecture
 
-![ProcuForge architecture](./diagram.png)
+ProcuForge architecture
 
 ```mermaid
 flowchart TB
