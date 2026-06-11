@@ -55,17 +55,12 @@ NEGOTIATOR_COMMS_SNAPSHOT_KEY = "negotiator_comms_snapshot"
 # Resets to 0 on any turn that makes progress. Used for the stall-guard force-close.
 NEGOTIATOR_STALL_STREAK_KEY = "negotiator_stall_streak"
 
-# Escalation notification (written by buyer agent; email sent by escalation_notifier
-# subagent via Mailgun MCP, called as an AgentTool from pr_router).
+# Escalation tracking (UI reads ESCALATION_CONTEXT_KEY via ui_mappers to render the
+# escalation banner). ESCALATION_PENDING_NOTIFY_KEY flags an active escalation that
+# has not yet been resolved by /workflow/{id}/resolve-escalation; the UI may surface
+# this as a "needs review" indicator. No outbound notifications are sent.
 ESCALATION_CONTEXT_KEY = "escalation_context"
 ESCALATION_PENDING_NOTIFY_KEY = "escalation_pending_notify"
-ESCALATION_EMAIL_SENT_AT_KEY = "escalation_email_sent_at"
-# Pre-resolved by resolve_escalation_recipient before pr_router's turn so the
-# LLM does not call Firestore mid-stream. Recipient priority: requester user's
-# email -> admin_user_email -> escalation_notify_email.
-ESCALATION_RECIPIENT_EMAIL_KEY = "escalation_recipient_email"
-ESCALATION_EMAIL_SUBJECT_KEY = "escalation_email_subject"
-ESCALATION_EMAIL_BODY_KEY = "escalation_email_body"
 INVOICE_CORRECTION_ROUNDS_KEY = "invoice_correction_rounds"
 PO_REJECTION_COUNT_KEY = "po_rejection_count"
 LOOP_ITERATION_KEY = "loop_iteration"

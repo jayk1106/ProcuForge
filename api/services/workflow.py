@@ -337,7 +337,6 @@ class WorkflowService:
         from procu_forge_buyer.pr_status_transitions import transition_resume_for_escalated
         from procu_forge_buyer.state_keys import (
             ESCALATION_CONTEXT_KEY,
-            ESCALATION_EMAIL_SENT_AT_KEY,
             ESCALATION_PENDING_NOTIFY_KEY,
             PR_STATUS_KEY,
             PREVIOUS_PR_STATUS_KEY,
@@ -396,7 +395,6 @@ class WorkflowService:
                     PREVIOUS_PR_STATUS_KEY: PrStatus.ESCALATED.value,
                     ESCALATION_CONTEXT_KEY: None,
                     ESCALATION_PENDING_NOTIFY_KEY: False,
-                    ESCALATION_EMAIL_SENT_AT_KEY: None,
                 }
             ),
         )

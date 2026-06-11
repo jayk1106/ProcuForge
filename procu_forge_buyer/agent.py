@@ -1,6 +1,5 @@
 from dotenv import load_dotenv
 from google.adk.agents import Agent, LoopAgent
-from google.adk.tools import agent_tool
 
 from adk_vertex_model import vertex_flash_llm
 
@@ -19,14 +18,8 @@ from .subagents.vendor_search import vendor_search_agent
 from .subagents.negotiator import negotiator_agent
 from .subagents.decision import decision_agent
 from .subagents.purchase_manager import purchase_manager_agent
-from .subagents.escalation_notifier import (
-    escalation_notifier_agent,
-    resolve_escalation_recipient,
-)
 
 load_dotenv()
-
-send_escalation_email_tool = agent_tool.AgentTool(agent=escalation_notifier_agent)
 
 PR_ROUTER_INSTRUCTION = """
 You are **pr_router**, the loop controller for buyer procurement.
@@ -34,36 +27,10 @@ You are **pr_router**, the loop controller for buyer procurement.
 Read **session.state** first — especially **pr_status**, **vendor_offers**, **request**, **selected_vendor**.
 Authoritative lifecycle: **docs/request_status.md**.
 
-## Top priority: send pending escalation email
-
-If **escalation_pending_notify** is True AND **escalation_email_sent_at** is empty,
-call the **send_escalation_email** tool EXACTLY ONCE before doing anything else
-(do NOT call **transfer_to_agent** on the same turn). Build the tool input as a
-single JSON object string with these fields, sourcing values from session.state:
-
-```
-{
-  "to": "<escalation_recipient_email>",
-  "subject": "<escalation_email_subject>",
-  "text": "<escalation_email_body>",
-  "from": "<MAILGUN_FROM_EMAIL env value if provided in escalation_email_body, otherwise omit>"
-}
-```
-
-Use the pre-rendered **escalation_recipient_email**, **escalation_email_subject**,
-and **escalation_email_body** values verbatim — do not paraphrase or summarize.
-If any of those three keys is missing, do not call the tool; produce no output.
-
-After the tool returns, end the turn. The next loop iteration will terminate via
-**stop_loop_if_terminal** because **escalation_email_sent_at** is now set.
-
-## Mechanism (normal routing)
-- On each **pr_router** turn (when no escalation email is pending), call
-  **transfer_to_agent** exactly once with a worker name below **unless**
-  **pr_status** is terminal or human-gated (then produce no tool call — the
-  outer loop stops from **pr_status**).
-- **transfer_to_agent** and **send_escalation_email** are the only tools; do
-  not invent other function names.
+## Mechanism
+- On each **pr_router** turn, call **transfer_to_agent** exactly once with a worker name below **unless**
+  **pr_status** is terminal or human-gated (then produce no tool call — the outer loop stops from **pr_status**).
+- Only **transfer_to_agent** exists; do not invent other function names.
 - Do **not** write user-facing prose except what the framework requires.
 
 ## Hard rules
@@ -103,11 +70,6 @@ CONTEXT:
 <request>{request?}</request>
 <vendor_offers>{vendor_offers?}</vendor_offers>
 <selected_vendor>{selected_vendor?}</selected_vendor>
-<escalation_pending_notify>{escalation_pending_notify?}</escalation_pending_notify>
-<escalation_email_sent_at>{escalation_email_sent_at?}</escalation_email_sent_at>
-<escalation_recipient_email>{escalation_recipient_email?}</escalation_recipient_email>
-<escalation_email_subject>{escalation_email_subject?}</escalation_email_subject>
-<escalation_email_body>{escalation_email_body?}</escalation_email_body>
 
 
 If **pr_status** is missing, treat as **INITIATED** and apply the **INITIATED** row.
@@ -121,10 +83,8 @@ pr_router = Agent(
     name="pr_router",
     description=(
         "Routes the procurement workflow: reads pr_status and delegates to "
-        "vendor_search, negotiator, decision, or purchase_manager. Sends "
-        "escalation emails via the send_escalation_email AgentTool when "
-        "escalation_pending_notify is set. Terminal and human-gated states "
-        "rely on pr_status, not exit_loop."
+        "vendor_search, negotiator, decision, or purchase_manager. "
+        "Terminal and human-gated states rely on pr_status, not exit_loop."
     ),
     instruction=PR_ROUTER_INSTRUCTION,
     model=vertex_flash_llm(),
@@ -134,9 +94,7 @@ pr_router = Agent(
         decision_agent,
         purchase_manager_agent,
     ],
-    tools=[send_escalation_email_tool],
     before_agent_callback=[
-        resolve_escalation_recipient,
         stop_loop_if_terminal,
         manage_log_before_pr_router,
     ],

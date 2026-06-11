@@ -18,13 +18,7 @@ from .pr_status_transitions import (
     pr_status_line,
     sync_purchase_pr_status_from_acks,
 )
-from .state_keys import (
-    ESCALATION_EMAIL_SENT_AT_KEY,
-    ESCALATION_PENDING_NOTIFY_KEY,
-    LOOP_ITERATION_KEY,
-    PLANNER_PLAN_KEY,
-    PR_STATUS_KEY,
-)
+from .state_keys import LOOP_ITERATION_KEY, PLANNER_PLAN_KEY, PR_STATUS_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -276,23 +270,9 @@ def stop_loop_if_terminal(callback_context: CallbackContext) -> types.Content | 
 
     Returns a minimal model ``Content`` so ADK emits an ``Event`` carrying
     ``actions.escalate`` (actions-only callbacks do not always yield an event).
-
-    Exception: when an escalation email is pending (``escalation_pending_notify``
-    is True and ``escalation_email_sent_at`` is empty), allow pr_router one more
-    turn so it can call ``send_escalation_email``. The next iteration will
-    terminate normally once the email is sent.
     """
     status = callback_context.state.get(PR_STATUS_KEY)
     if status not in _STOP_PR_STATUS_VALUES:
-        return None
-
-    state = callback_context.state
-    if state.get(ESCALATION_PENDING_NOTIFY_KEY) and not state.get(
-        ESCALATION_EMAIL_SENT_AT_KEY
-    ):
-        logger.info(
-            "loop_continue reason=escalation_pending pr_status=%s", status
-        )
         return None
 
     callback_context.actions.escalate = True

@@ -24,11 +24,7 @@ from db.firestore.repositories.rfq_index import RfqIndexRepository
 from db.firestore.repositories.vendor_thread_state import VendorThreadStateRepository
 from db.firestore.repositories.vendors import VendorRepository
 from db.firestore.repositories.workflow_events import WorkflowEventsRepository
-from procu_forge_buyer.state_keys import (
-    ESCALATION_CONTEXT_KEY,
-    ESCALATION_PENDING_NOTIFY_KEY,
-    VENDOR_THREAD_OVERRIDES_KEY,
-)
+from procu_forge_buyer.state_keys import VENDOR_THREAD_OVERRIDES_KEY
 
 logger_name = __name__
 logger = logging.getLogger(__name__)
@@ -210,23 +206,6 @@ class VendorThreadQueryService:
         }
 
         state_delta: dict = {VENDOR_THREAD_OVERRIDES_KEY: overrides}
-        if status == VendorThreadStatus.ESCALATED:
-            state_delta[ESCALATION_CONTEXT_KEY] = {
-                "tier": "notify_only",
-                "source": "manual_vendor_thread",
-                "reason": reason or "Vendor thread escalated for human review",
-                "trigger_status": (
-                    session.state.get("pr_status")
-                    if isinstance(session.state, dict)
-                    else None
-                ),
-                "phase": "neg",
-                "vendor_id": vendor_id,
-                "rfq_id": rfq_id,
-                "triggered_at": applied_at,
-                "recommended_action": "Review escalated vendor thread and decide next action.",
-            }
-            state_delta[ESCALATION_PENDING_NOTIFY_KEY] = True
 
         session_service = VertexAiSessionService(
             project=self._settings.vertex_project_id,
