@@ -10,7 +10,6 @@ from google.adk.agents.callback_context import CallbackContext
 from google.genai import types
 
 from ...callbacks import (
-    _plan_summary,
     _product_id,
     _request_id,
     managed_log_after_handler,
@@ -18,7 +17,7 @@ from ...callbacks import (
 )
 from ...pr_status import PrStatus
 from ...pr_status_transitions import pr_status_line
-from ...state_keys import PLANNER_PLAN_KEY, PR_STATUS_KEY, VENDOR_OFFERS_KEY
+from ...state_keys import PR_STATUS_KEY, VENDOR_OFFERS_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -103,12 +102,11 @@ def _offers_detail_block(st: dict[str, Any]) -> str:
 
 def _vendor_before(ctx: CallbackContext, st: dict[str, Any]) -> str:
     return (
-        "vendor_search_agent start session_id=%s request_id=%s product_id=%s plan=%s offer_count=%s %s"
+        "vendor_search_agent start session_id=%s request_id=%s product_id=%s offer_count=%s %s"
         % (
             ctx.session.id,
             _request_id(st) or "",
             _product_id(st) or "",
-            _plan_summary(st.get(PLANNER_PLAN_KEY)),
             _offers_count_teaser(st),
             pr_status_line(st),
         )
@@ -117,12 +115,11 @@ def _vendor_before(ctx: CallbackContext, st: dict[str, Any]) -> str:
 
 def _vendor_after(ctx: CallbackContext, st: dict[str, Any]) -> str:
     return (
-        "vendor_search_agent end session_id=%s request_id=%s product_id=%s plan=%s offer_count=%s %s"
+        "vendor_search_agent end session_id=%s request_id=%s product_id=%s offer_count=%s %s"
         % (
             ctx.session.id,
             _request_id(st) or "",
             _product_id(st) or "",
-            _plan_summary(st.get(PLANNER_PLAN_KEY)),
             _offers_count_teaser(st),
             pr_status_line(st),
         )

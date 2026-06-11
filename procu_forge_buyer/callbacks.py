@@ -18,7 +18,7 @@ from .pr_status_transitions import (
     pr_status_line,
     sync_purchase_pr_status_from_acks,
 )
-from .state_keys import LOOP_ITERATION_KEY, PLANNER_PLAN_KEY, PR_STATUS_KEY
+from .state_keys import LOOP_ITERATION_KEY, PR_STATUS_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -80,25 +80,6 @@ def _product_id(state: dict[str, Any]) -> str | None:
     return None
 
 
-def _plan_summary(plan: object | None) -> str:
-    if plan is None:
-        return "none"
-    if isinstance(plan, dict):
-        reasoning = plan.get("reasoning")
-        reasoning_s = str(reasoning) if reasoning is not None else ""
-        reasoning_s = " ".join(reasoning_s.split())
-        if len(reasoning_s) > 140:
-            reasoning_s = reasoning_s[:137] + "..."
-        parts = [
-            str(plan.get("next_action", "")),
-            str(plan.get("agent_to_invoke", "")),
-            f"conf={plan.get('confidence')}",
-            f"reasoning={reasoning_s}" if reasoning_s else "",
-        ]
-        return ",".join(p for p in parts if p and p != "None")
-    return str(plan)[:400]
-
-
 def _span_banner(span: str, *, end: bool = False) -> str:
     phase = "END" if end else "START"
     return f"------------- {phase} {span.upper()} -------------"
@@ -134,12 +115,11 @@ def managed_log_after_handler(
 
 def _orch_before(ctx: CallbackContext, st: dict[str, Any]) -> str:
     return (
-        "procu_forge_buyer start session_id=%s request_id=%s product_id=%s plan=%s %s"
+        "procu_forge_buyer start session_id=%s request_id=%s product_id=%s %s"
         % (
             ctx.session.id,
             _request_id(st) or "",
             _product_id(st) or "",
-            _plan_summary(st.get(PLANNER_PLAN_KEY)),
             pr_status_line(st),
         )
     )
@@ -147,12 +127,11 @@ def _orch_before(ctx: CallbackContext, st: dict[str, Any]) -> str:
 
 def _orch_after(ctx: CallbackContext, st: dict[str, Any]) -> str:
     return (
-        "procu_forge_buyer end session_id=%s request_id=%s product_id=%s plan=%s %s"
+        "procu_forge_buyer end session_id=%s request_id=%s product_id=%s %s"
         % (
             ctx.session.id,
             _request_id(st) or "",
             _product_id(st) or "",
-            _plan_summary(st.get(PLANNER_PLAN_KEY)),
             pr_status_line(st),
         )
     )
@@ -210,12 +189,11 @@ def detect_loop_exhaustion(callback_context: CallbackContext) -> None:
 
 def _pr_router_before(ctx: CallbackContext, st: dict[str, Any]) -> str:
     return (
-        "pr_router start session_id=%s request_id=%s product_id=%s plan=%s %s"
+        "pr_router start session_id=%s request_id=%s product_id=%s %s"
         % (
             ctx.session.id,
             _request_id(st) or "",
             _product_id(st) or "",
-            _plan_summary(st.get(PLANNER_PLAN_KEY)),
             pr_status_line(st),
         )
     )
@@ -223,12 +201,11 @@ def _pr_router_before(ctx: CallbackContext, st: dict[str, Any]) -> str:
 
 def _pr_router_after(ctx: CallbackContext, st: dict[str, Any]) -> str:
     return (
-        "pr_router end session_id=%s request_id=%s product_id=%s plan=%s %s"
+        "pr_router end session_id=%s request_id=%s product_id=%s %s"
         % (
             ctx.session.id,
             _request_id(st) or "",
             _product_id(st) or "",
-            _plan_summary(st.get(PLANNER_PLAN_KEY)),
             pr_status_line(st),
         )
     )

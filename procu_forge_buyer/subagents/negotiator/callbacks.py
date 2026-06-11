@@ -13,7 +13,6 @@ from google.adk.agents.context import Context
 from google.adk.tools.base_tool import BaseTool
 
 from ...callbacks import (
-    _plan_summary,
     _product_id,
     _request_id,
     managed_log_after_handler,
@@ -31,7 +30,6 @@ from ...state_keys import (
     NEGOTIATION_CONFIG_KEY,
     NEGOTIATOR_COMMS_SNAPSHOT_KEY,
     NEGOTIATOR_STALL_STREAK_KEY,
-    PLANNER_PLAN_KEY,
 )
 
 logger = logging.getLogger(__name__)
@@ -79,12 +77,11 @@ def _negotiation_progress_line(st: dict[str, Any]) -> str:
 
 def _negotiator_before(ctx: CallbackContext, st: dict[str, Any]) -> str:
     return (
-        "negotiator_agent start session_id=%s request_id=%s product_id=%s plan=%s %s %s"
+        "negotiator_agent start session_id=%s request_id=%s product_id=%s %s %s"
         % (
             ctx.session.id,
             _request_id(st) or "",
             _product_id(st) or "",
-            _plan_summary(st.get(PLANNER_PLAN_KEY)),
             pr_status_line(st),
             _negotiation_progress_line(st),
         )
@@ -93,12 +90,11 @@ def _negotiator_before(ctx: CallbackContext, st: dict[str, Any]) -> str:
 
 def _negotiator_after(ctx: CallbackContext, st: dict[str, Any]) -> str:
     return (
-        "negotiator_agent end session_id=%s request_id=%s product_id=%s plan=%s %s %s"
+        "negotiator_agent end session_id=%s request_id=%s product_id=%s %s %s"
         % (
             ctx.session.id,
             _request_id(st) or "",
             _product_id(st) or "",
-            _plan_summary(st.get(PLANNER_PLAN_KEY)),
             pr_status_line(st),
             _negotiation_progress_line(st),
         )

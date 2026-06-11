@@ -10,7 +10,6 @@ from google.adk.agents.callback_context import CallbackContext
 from google.genai import types
 
 from ...callbacks import (
-    _plan_summary,
     _product_id,
     _request_id,
     _session_state_dict,
@@ -24,7 +23,6 @@ from ...pr_status_transitions import (
     sync_purchase_pr_status_from_acks,
 )
 from ...state_keys import (
-    PLANNER_PLAN_KEY,
     PR_STATUS_KEY,
     PURCHASE_STALL_STREAK_KEY,
     PURCHASE_STEP_SNAPSHOT_KEY,
@@ -71,12 +69,11 @@ def _purchase_progress_line(st: dict[str, Any]) -> str:
 
 def _purchase_before(ctx: CallbackContext, st: dict[str, Any]) -> str:
     return (
-        "purchase_manager_agent start session_id=%s request_id=%s product_id=%s plan=%s %s %s"
+        "purchase_manager_agent start session_id=%s request_id=%s product_id=%s %s %s"
         % (
             ctx.session.id,
             _request_id(st) or "",
             _product_id(st) or "",
-            _plan_summary(st.get(PLANNER_PLAN_KEY)),
             pr_status_line(st),
             _purchase_progress_line(st),
         )
@@ -85,12 +82,11 @@ def _purchase_before(ctx: CallbackContext, st: dict[str, Any]) -> str:
 
 def _purchase_after(ctx: CallbackContext, st: dict[str, Any]) -> str:
     return (
-        "purchase_manager_agent end session_id=%s request_id=%s product_id=%s plan=%s %s %s"
+        "purchase_manager_agent end session_id=%s request_id=%s product_id=%s %s %s"
         % (
             ctx.session.id,
             _request_id(st) or "",
             _product_id(st) or "",
-            _plan_summary(st.get(PLANNER_PLAN_KEY)),
             pr_status_line(st),
             _purchase_progress_line(st),
         )
