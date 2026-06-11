@@ -217,18 +217,23 @@ def phase_status_map(status: PrStatus) -> dict[PhaseId, PhaseStatus]:
         result["po"] = "walked"
         return result
 
-    # Negotiation rounds are over and a vendor has been (or is being) selected.
-    # Advance to the vendor pill — it owns the in-progress state until PO work
-    # actually starts (AWAITING_PO_APPROVAL / PO_ISSUED).
-    if status in {
-        PrStatus.NEGOTIATION_COMPLETED,
-        PrStatus.VENDOR_SELECTED,
-        PrStatus.AWAITING_USER_APPROVAL,
-    }:
+    # Negotiation rounds are over but the buyer has not yet picked a vendor —
+    # the vendor-selection pill owns the in-progress state.
+    if status == PrStatus.NEGOTIATION_COMPLETED:
         result = {p: "pending" for p in PHASE_ORDER}
         result["rfq"] = "done"
         result["neg"] = "done"
         result["vendor"] = "in_progress"
+        return result
+
+    # A vendor has been selected (or is awaiting the legacy user-approval gate).
+    # Vendor selection is complete; the next active step is the PO.
+    if status in {PrStatus.VENDOR_SELECTED, PrStatus.AWAITING_USER_APPROVAL}:
+        result = {p: "pending" for p in PHASE_ORDER}
+        result["rfq"] = "done"
+        result["neg"] = "done"
+        result["vendor"] = "done"
+        result["po"] = "in_progress"
         return result
 
     current = pr_status_to_phase_id(status)
