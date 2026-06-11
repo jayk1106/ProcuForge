@@ -8,9 +8,6 @@ export default function VendorsPage() {
 
   return (
     <div className="viewport">
-      <div className="crumbs">
-        <span className="here">Vendors</span>
-      </div>
       <header className="page-head row between">
         <div>
           <h1 className="page-title">Vendor conversations</h1>
