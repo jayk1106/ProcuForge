@@ -2,7 +2,7 @@
 
 Single-user admin authentication for the ProcuForge admin panel.
 
-For production deployment (Vercel + Cloud Run, CORS, secrets), see [production_setup_guide.md](./production_setup_guide.md).
+For production deployment (Vercel + Cloud Run, CORS, secrets), see [deployment_guide.md](./deployment_guide.md).
 
 ## What it protects
 
@@ -35,7 +35,7 @@ Left intentionally public:
 └───────────────────────────────────────────────────┘
 ```
 
-In production the frontend (Vercel) and API (Cloud Run) are on **different domains**. The session cookie is stored for the API domain. `AuthGate` verifies auth via `GET /auth/me` instead of checking cookie presence on the Vercel domain. See [production_setup_guide.md#authentication-in-production](./production_setup_guide.md#authentication-in-production).
+In production the frontend (Vercel) and API (Cloud Run) are on **different domains**. The session cookie is stored for the API domain. `AuthGate` verifies auth via `GET /auth/me` instead of checking cookie presence on the Vercel domain.
 
 Two JWT flavours are issued, both signed with `JWT_SECRET` (HS256):
 
