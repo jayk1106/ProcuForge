@@ -1,17 +1,29 @@
 'use client'
 
-import { Suspense, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { login, UnauthorizedError } from '@/lib/api-client'
+import { useAuth } from '@/hooks/useAuth'
 
 function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const next = searchParams.get('next') || '/flows'
+  const passFromQuery = searchParams.get('pass')
+  const { me, loading: authLoading } = useAuth()
 
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+
+  useEffect(() => {
+    if (authLoading || me || !passFromQuery) return
+    setPassword(passFromQuery)
+    const params = new URLSearchParams(searchParams.toString())
+    params.delete('pass')
+    const query = params.toString()
+    router.replace(query ? `/login?${query}` : '/login')
+  }, [authLoading, me, passFromQuery, router, searchParams])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()

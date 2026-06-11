@@ -2,6 +2,8 @@
 
 ![ProcuForge architecture](./diagram.png)
 
+ProcuForge architecture
+
 ```mermaid
 flowchart TB
     Buyer["👤 Buyer Organization<br/>Creates Purchase Request"]
