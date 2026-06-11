@@ -3,9 +3,13 @@ import json
 from google.adk.agents import Agent
 from google.adk.agents.readonly_context import ReadonlyContext
 
-from adk_vertex_model import vertex_flash_model
+from adk_vertex_model import vertex_flash_llm
 
-from .callbacks import purchase_manager_after_agent, purchase_manager_before_agent
+from .callbacks import (
+    gate_for_approval,
+    purchase_manager_after_agent,
+    purchase_manager_before_agent,
+)
 from .tools import (
     build_purchase_progress,
     send_grn_created,
@@ -112,12 +116,12 @@ purchase_manager_agent = Agent(
         "validated vendor responses."
     ),
     instruction=purchase_manager_instruction,
-    model=vertex_flash_model(),
+    model=vertex_flash_llm(),
     tools=[
         send_po,
         send_grn_created,
         send_process_complete,
     ],
-    before_agent_callback=purchase_manager_before_agent,
+    before_agent_callback=[gate_for_approval, purchase_manager_before_agent],
     after_agent_callback=purchase_manager_after_agent,
 )

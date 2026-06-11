@@ -1,7 +1,9 @@
 export interface OrgAddress {
+  address: string
   country: string
   state: string
   city: string
+  pincode: string
 }
 
 export interface AdminUserProfile {

@@ -43,6 +43,20 @@ class VendorThreadRowDTO(BaseModel):
     done: bool = False
 
 
+class PagedWorkflowRows(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+    items: list[WorkflowRowDTO]
+    next_cursor: str | None = Field(default=None, alias="nextCursor")
+
+
+class PagedVendorThreadRows(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+    items: list[VendorThreadRowDTO]
+    next_cursor: str | None = Field(default=None, alias="nextCursor")
+
+
 class VendorThreadMessageDTO(BaseModel):
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
@@ -102,16 +116,35 @@ class ActiveVendorDTO(BaseModel):
     status: Literal["NEGOTIATING", "WON", "LOST", "WALKED_AWAY"]
     latest: float | None = None
     delta: float | None = None
+    target: float | None = None
+    budget: float | None = None
     moq: int = 1
     lead: str = "—"
     escalated: bool = False
-    thread: list[dict[str, str]] = Field(default_factory=list)
+    thread: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ActivityItemDTO(BaseModel):
     ts: str
     ag: str
     det: str
+
+
+class VendorRelationSummaryDTO(BaseModel):
+    """Buyer↔vendor relationship signals surfaced alongside each discovered offer."""
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+    preferred_vendor: bool = Field(default=False, alias="preferredVendor")
+    relationship_status: str = Field(default="", alias="relationshipStatus")
+    relationship_strength: float | None = Field(default=None, alias="relationshipStrength")
+    average_delivery_delay_days: float | None = Field(
+        default=None, alias="averageDeliveryDelayDays"
+    )
+    quality_score: float | None = Field(default=None, alias="qualityScore")
+    risk_level: str | None = Field(default=None, alias="riskLevel")
+    usually_offers_discount: bool | None = Field(default=None, alias="usuallyOffersDiscount")
+    average_discount_percent: float | None = Field(default=None, alias="averageDiscountPercent")
 
 
 class DiscoveredVendorDTO(BaseModel):
@@ -130,6 +163,11 @@ class DiscoveredVendorDTO(BaseModel):
     lead_time_days: int | None = Field(default=None, alias="leadTimeDays")
     contracted: bool = False
     availability: str = Field(default="", alias="availabilityStatus")
+    minimum_order_qty: int = Field(default=0, alias="minimumOrderQty")
+    currency_matches_request: bool = Field(default=True, alias="currencyMatchesRequest")
+    vendor_relation: VendorRelationSummaryDTO | None = Field(
+        default=None, alias="vendorRelation"
+    )
 
 
 class WorkflowDetailDTO(BaseModel):
@@ -160,3 +198,11 @@ class WorkflowDetailDTO(BaseModel):
     grn: dict[str, Any] | None = None
     invoice: dict[str, Any] | None = None
     selected_vendor: dict[str, Any] | None = Field(default=None, alias="selectedVendor")
+    approval_required: bool = Field(default=False, alias="approvalRequired")
+    pending_approval: dict[str, Any] | None = Field(
+        default=None, alias="pendingApproval"
+    )
+    approved_steps: list[str] = Field(default_factory=list, alias="approvedSteps")
+    escalation_context: dict[str, Any] | None = Field(
+        default=None, alias="escalationContext"
+    )

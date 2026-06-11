@@ -8,9 +8,8 @@ interface TopNavProps {
 }
 
 const tabs = [
-  { id: 'flows',    label: 'Flows',    href: '/flows' },
+  { id: 'flows',    label: 'Requests', href: '/flows' },
   { id: 'vendors',  label: 'Vendors',  href: '/vendors' },
-  { id: 'settings', label: 'Settings', href: '/settings' },
 ]
 
 export function TopNav({ onNewRequest }: TopNavProps) {
@@ -21,7 +20,6 @@ export function TopNav({ onNewRequest }: TopNavProps) {
   function isActive(id: string) {
     if (id === 'flows') return pathname.startsWith('/flows')
     if (id === 'vendors') return pathname.startsWith('/vendors')
-    if (id === 'settings') return pathname.startsWith('/settings')
     return false
   }
 
@@ -47,7 +45,6 @@ export function TopNav({ onNewRequest }: TopNavProps) {
           ))}
         </div>
         <div className="nav-right">
-          <span className="t-xs faint">press ⌘K to search</span>
           <button className="btn accent" onClick={onNewRequest}>
             [ + new request ]
           </button>

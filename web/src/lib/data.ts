@@ -1,7 +1,10 @@
 import type { Phase, Flow, ActiveFlow, VendorConvo, Vendor } from '@/types'
 
 export const PHASES: Phase[] = [
-  { id: 'rfq',  label: 'RFQ',  long: 'Request for Quote' },
+  // Phase id stays 'rfq' for backwards compatibility with the backend phase
+  // mapping; the user-facing label reflects what actually happens in this
+  // phase — vendor discovery. RFQs go out during NEG.
+  { id: 'rfq',  label: 'DISC', long: 'Vendor Discovery' },
   { id: 'neg',  label: 'NEG',  long: 'Negotiation' },
   { id: 'po',   label: 'PO',   long: 'Purchase Order' },
   { id: 'grn',  label: 'GRN',  long: 'Goods Receipt' },
@@ -312,13 +315,6 @@ export const VENDOR_CONVO: VendorConvo = {
     },
   ],
 }
-
-export const SUGGESTED: string[] = [
-  "Why is V-0421 holding price?",
-  "Show me what's blocking",
-  "What's the negotiation strategy?",
-  "Summarize this PR",
-]
 
 export const VENDORS: Vendor[] = [
   { id: 'V-0218', name: 'Heinrich Tooling GmbH',       country: 'DE', tier: 'Tier-2', pr: 'PR-2026-0418', last: '14:32',     state: 'NEGOTIATING',     unread: 0, msgs: 12 },

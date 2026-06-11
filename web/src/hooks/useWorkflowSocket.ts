@@ -131,6 +131,7 @@ export function useWorkflowSocket<T>(
 
         const env = parsed as ServerEnvelope<T>
         if (env.event_type !== 'state_changed') {
+          console.log('Event Data', env.data)
           wsLog(debugLabel, 'dedupe-drop reason=unknown_event_type', {
             type: env.event_type,
           })
@@ -189,7 +190,7 @@ export function useWorkflowSocket<T>(
       if (cancelled) return
       const delay =
         RECONNECT_DELAYS_MS[
-          Math.min(reconnectAttempt, RECONNECT_DELAYS_MS.length - 1)
+        Math.min(reconnectAttempt, RECONNECT_DELAYS_MS.length - 1)
         ]
       reconnectAttempt += 1
       wsLog(debugLabel, 'reconnect', { attempt: reconnectAttempt, delayMs: delay })

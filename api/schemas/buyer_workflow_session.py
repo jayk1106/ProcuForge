@@ -13,7 +13,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from api.schemas.workflow import BuyerSessionRequestState
 from db.collections.product import Product
 from procu_forge_buyer.pr_status import PrStatus
-from procu_forge_buyer.subagents.planner.plan import PlannerPlan
 from procu_forge_buyer.subagents.vendor_search.schema import ProductVendorOffers
 
 
@@ -41,18 +40,25 @@ class BuyerWorkflowSessionState(BaseModel):
         default=None,
         description="Prior pr_status before the last transition that changed pr_status.",
     )
-    planner_plan: PlannerPlan | None = Field(
-        default=None,
-        description=(
-            "Optional structured plan (next_action, agent_to_invoke, …) if written by tooling; "
-            "orchestrator does not require this field."
-        ),
-    )
     vendor_offers: ProductVendorOffers | None = Field(
         default=None,
         description=(
             "Supplier lines for request.product_id (`productId` + `offers`); "
             "updated when vendor_search_agent runs load_vendor_offers_for_product."
+        ),
+    )
+    approval_required: bool = Field(
+        default=False,
+        description=(
+            "When True, purchase_manager pauses before each of PO, GRN, and "
+            "PROCESS_COMPLETE until POST /workflow/{id}/approve is called."
+        ),
+    )
+    approved_steps: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Steps the human has already signed off on. Values: 'po' | 'grn' | "
+            "'completion'. Appended by the approve endpoint."
         ),
     )
 

@@ -19,9 +19,11 @@ class FirestoreBaseModel(BaseModel):
 
 
 class Address(FirestoreBaseModel):
+    address: str = ""
     country: str
     state: str
     city: str
+    pincode: str = ""
 
 
 class Contact(FirestoreBaseModel):

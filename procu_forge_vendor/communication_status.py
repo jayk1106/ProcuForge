@@ -55,6 +55,9 @@ _ALLOWED_TRANSITIONS: dict[VendorThreadStatus | None, set[VendorThreadStatus]] =
     VendorThreadStatus.ACCEPTED: {
         VendorThreadStatus.PO_RECEIVED,
         VendorThreadStatus.RFQ_CLOSED,
+        # Buyer accepted us but then picked another vendor — purchase_manager
+        # sends WALKAWAY before closing this thread.
+        VendorThreadStatus.BUYER_WALKED_AWAY,
     },
     VendorThreadStatus.BUYER_WALKED_AWAY: {VendorThreadStatus.RFQ_CLOSED},
     VendorThreadStatus.VENDOR_WALKED_AWAY: {VendorThreadStatus.RFQ_CLOSED},

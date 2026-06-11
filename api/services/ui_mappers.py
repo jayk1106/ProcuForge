@@ -10,6 +10,7 @@ from api.schemas.ui_dto import (
     ActivityItemDTO,
     DiscoveredVendorDTO,
     VendorConvoDTO,
+    VendorRelationSummaryDTO,
     VendorThreadMessageDTO,
     VendorThreadRowDTO,
     VendorThreadSummaryDTO,
@@ -37,9 +38,13 @@ from db.collections.product import Product
 from db.collections.vendor import Vendor
 from db.collections.workflow_event import WorkflowEventDoc
 from procu_forge_buyer.state_keys import (
+    APPROVAL_REQUIRED_KEY,
+    APPROVED_STEPS_KEY,
+    ESCALATION_CONTEXT_KEY,
     GRN_KEY,
     INVOICE_KEY,
     NEGOTIATION_CONFIG_KEY,
+    PENDING_APPROVAL_KEY,
     PO_KEY,
     PR_STATUS_KEY,
     REQUEST_KEY,
@@ -59,6 +64,29 @@ def _get(d: dict[str, Any], *keys: str, default: Any = None) -> Any:
         if key in d and d[key] is not None:
             return d[key]
     return default
+
+
+def _relation_summary_dto(raw: Any) -> VendorRelationSummaryDTO | None:
+    if not isinstance(raw, dict):
+        return None
+    return VendorRelationSummaryDTO(
+        preferredVendor=bool(_get(raw, "preferredVendor", "preferred_vendor", default=False)),
+        relationshipStatus=str(
+            _get(raw, "relationshipStatus", "relationship_status", default="") or ""
+        ),
+        relationshipStrength=_coerce_float(
+            _get(raw, "relationshipStrength", "relationship_strength")
+        ),
+        averageDeliveryDelayDays=_coerce_float(
+            _get(raw, "averageDeliveryDelayDays", "average_delivery_delay_days")
+        ),
+        qualityScore=_coerce_float(_get(raw, "qualityScore", "quality_score")),
+        riskLevel=_get(raw, "riskLevel", "risk_level"),
+        usuallyOffersDiscount=_get(raw, "usuallyOffersDiscount", "usually_offers_discount"),
+        averageDiscountPercent=_coerce_float(
+            _get(raw, "averageDiscountPercent", "average_discount_percent")
+        ),
+    )
 
 
 def _parse_dt(raw: str | None) -> datetime | None:
@@ -126,18 +154,25 @@ def _latest_price_from_communications(comms: list[Any]) -> float | None:
     return None
 
 
-def _build_thread_preview(comms: list[Any], limit: int = 3) -> list[dict[str, str]]:
-    preview: list[dict[str, str]] = []
-    for entry in comms[-limit:]:
+def _build_thread_preview(comms: list[Any]) -> list[dict[str, Any]]:
+    preview: list[dict[str, Any]] = []
+    for entry in comms:
         if not isinstance(entry, dict):
             continue
         msg_type = str(entry.get("message_type") or entry.get("messageType") or "MSG")
         round_num = entry.get("round")
+        payload = entry.get("payload")
+        if not isinstance(payload, dict):
+            payload = {}
         preview.append(
             {
                 "who": "them" if entry.get("from_agent") == "vendor_agent" else "us",
                 "what": msg_type,
                 "meta": f"round {round_num}" if round_num is not None else "",
+                "type": msg_type,
+                "round": round_num,
+                "ts": entry.get("ts"),
+                "payload": payload,
             }
         )
     return preview
@@ -147,7 +182,10 @@ def _event_to_activity(event: WorkflowEventDoc) -> ActivityItemDTO:
     ts = event.ts.strftime("%Y-%m-%d %H:%M") if event.ts else ""
     payload = event.payload if isinstance(event.payload, dict) else {}
     detail = _activity_detail_for_event(event.event_type, payload)
-    return ActivityItemDTO(ts=ts, ag=event.author or "system", det=detail)
+    agent = event.author or "system"
+    if event.event_type == "workflow_escalated":
+        agent = "EscalationAgent"
+    return ActivityItemDTO(ts=ts, ag=agent, det=detail)
 
 
 def _activity_detail_for_event(event_type: str, payload: dict[str, Any]) -> str:
@@ -163,6 +201,8 @@ def _activity_detail_for_event(event_type: str, payload: dict[str, Any]) -> str:
         return f"Escalated thread {payload.get('rfq_id', '?')}"
     if event_type == "vendor_thread_walked_away":
         return f"Walked away from thread {payload.get('rfq_id', '?')}"
+    if event_type == "workflow_escalated":
+        return f"Escalation: {payload.get('reason') or payload.get('source') or 'human review required'}"
     return event_type.replace("_", " ")
 
 
@@ -246,7 +286,16 @@ def workflow_detail_from_state(
             comms = cfg.get("communications")
             comms_list = comms if isinstance(comms, list) else []
             latest = _latest_price_from_communications(comms_list)
-            delta = (latest - target) if latest is not None and target else None
+            # Compare against the per-unit target_price the negotiator computed
+            # for this vendor (catalog-aware, budget-capped), not the workflow's
+            # total budget_ceiling — those have different units.
+            vendor_target = _coerce_float(cfg.get("target_price"))
+            vendor_budget = _coerce_float(cfg.get("budget_per_unit"))
+            delta = (
+                round(latest - vendor_target, 2)
+                if latest is not None and vendor_target is not None
+                else None
+            )
             round_val = cfg.get("round")
             rfq_id = str(cfg.get("rfq_id") or "")
             thread_status = infer_vendor_thread_status(
@@ -272,6 +321,8 @@ def workflow_detail_from_state(
                     status=to_active_vendor_status(thread_status),
                     latest=latest,
                     delta=delta,
+                    target=vendor_target,
+                    budget=vendor_budget,
                     moq=int(moq) if isinstance(moq, (int, float)) else 1,
                     lead=f"{lead_days}d" if lead_days is not None else "—",
                     escalated=thread_status.name == "ESCALATED",
@@ -313,6 +364,11 @@ def workflow_detail_from_state(
         unit_price = _coerce_float(_get(offer, "unitPrice", "unit_price"))
         lead_raw = _get(offer, "leadTimeDays", "lead_time_days")
         lead_days = int(lead_raw) if isinstance(lead_raw, (int, float)) else None
+        moq_raw = _get(offer, "minimumOrderQty", "minimum_order_qty")
+        moq = int(moq_raw) if isinstance(moq_raw, (int, float)) else 0
+        currency_matches = bool(
+            _get(offer, "currencyMatchesRequest", "currency_matches_request", default=True)
+        )
         discovered.append(
             DiscoveredVendorDTO(
                 offerId=str(_get(offer, "id", default=vid)),
@@ -327,6 +383,11 @@ def workflow_detail_from_state(
                 contracted=bool(offer.get("contracted")),
                 availabilityStatus=str(
                     _get(offer, "availabilityStatus", "availability_status", default="") or ""
+                ),
+                minimumOrderQty=moq,
+                currencyMatchesRequest=currency_matches,
+                vendorRelation=_relation_summary_dto(
+                    _get(offer, "vendorRelation", "vendor_relation")
                 ),
             )
         )
@@ -362,6 +423,22 @@ def workflow_detail_from_state(
         grn=state.get(GRN_KEY) if isinstance(state.get(GRN_KEY), dict) else None,
         invoice=state.get(INVOICE_KEY) if isinstance(state.get(INVOICE_KEY), dict) else None,
         selectedVendor=selected if isinstance(selected, dict) else None,
+        approvalRequired=bool(state.get(APPROVAL_REQUIRED_KEY)),
+        pendingApproval=(
+            state.get(PENDING_APPROVAL_KEY)
+            if isinstance(state.get(PENDING_APPROVAL_KEY), dict)
+            else None
+        ),
+        approvedSteps=(
+            list(state.get(APPROVED_STEPS_KEY))
+            if isinstance(state.get(APPROVED_STEPS_KEY), list)
+            else []
+        ),
+        escalationContext=(
+            state.get(ESCALATION_CONTEXT_KEY)
+            if isinstance(state.get(ESCALATION_CONTEXT_KEY), dict)
+            else None
+        ),
     )
 
 

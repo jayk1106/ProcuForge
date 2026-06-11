@@ -12,13 +12,12 @@ from api.schemas.buyer_workflow_session import BuyerWorkflowSessionState
 from api.schemas.workflow import (
     BuyerSessionRequestState,
     WorkflowApproveResponse,
+    WorkflowResolveEscalationResponse,
     WorkflowStartRequest,
     WorkflowStartResponse,
 )
 from db.collections.product import Product
-from db.collections.workflow_index import WorkflowIndexEntry
 from db.firestore.repositories.products import ProductRepository
-from db.firestore.repositories.workflow_index import WorkflowIndexRepository
 from procu_forge_buyer.pr_status import PrStatus
 
 logger = logging.getLogger(__name__)
@@ -48,11 +47,9 @@ class WorkflowService:
         self,
         product_repo: ProductRepository,
         settings: APISettings,
-        index_repo: WorkflowIndexRepository | None = None,
     ) -> None:
         self._product_repo = product_repo
         self._settings = settings
-        self._index_repo = index_repo
 
     async def start(
         self, request: WorkflowStartRequest
@@ -79,21 +76,21 @@ class WorkflowService:
             requester_id=requester_id,
         )
 
-        await self._create_session(workflow_id, user_id, buyer_request, product)
-
-        qty_label = f"{product.name} × {request.quantity}"
-        await self._write_index(
-            workflow_id=workflow_id,
-            request_id=buyer_request.request_id,
-            organization_id=organization_id,
-            product_id=product.id,
-            product_name=qty_label,
-            requester_id=requester_id,
-            pr_status=PrStatus.INITIATED.value,
-            started_at=started_at,
-            vendor_count=0,
-            needs_action=False,
+        initial_state = await self._create_session(
+            workflow_id,
+            user_id,
+            buyer_request,
+            product,
+            approval_required=request.approval_required,
         )
+
+        # Seed the Firestore workflow_state row immediately from the initial
+        # state we just wrote, so the flows list reflects the new flow before
+        # the first agent state_delta. Direct projection avoids a Vertex
+        # eventual-consistency race that a broadcast-driven factory would hit.
+        from api.services.state_projection import project_workflow_state
+
+        await project_workflow_state(workflow_id, initial_state)
 
         response = WorkflowStartResponse(
             workflow_id=workflow_id,
@@ -206,11 +203,15 @@ class WorkflowService:
     async def approve(
         self, workflow_id: str
     ) -> tuple[WorkflowApproveResponse, AgentJob]:
-        """Approve a workflow at AWAITING_USER_APPROVAL and advance to PO_ISSUED.
+        """Approve a parked workflow and advance pr_status to the resume value.
 
-        Reads the current session, verifies the status, injects a state-delta
-        event to advance pr_status to PO_ISSUED, then returns a job to re-run
-        the agent so the purchase_manager can issue the PO.
+        Infers which step is being approved from the current ``pr_status``:
+        ``AWAITING_PO_APPROVAL`` → step ``po``, resume ``VENDOR_SELECTED``;
+        ``AWAITING_GRN_APPROVAL`` → step ``grn``, resume ``PO_ACKNOWLEDGED``;
+        ``AWAITING_COMPLETION_APPROVAL`` → step ``completion``, resume
+        ``INVOICE_UNDER_VERIFICATION``. Records the step in
+        ``approved_steps`` so the gating callback will not re-park on this
+        step, clears ``pending_approval``, and queues an agent re-run.
         """
         from datetime import datetime, timezone
 
@@ -219,7 +220,24 @@ class WorkflowService:
         from google.adk.sessions import VertexAiSessionService
 
         from procu_forge_buyer.pr_status import PrStatus
-        from procu_forge_buyer.state_keys import PR_STATUS_KEY, PREVIOUS_PR_STATUS_KEY
+        from procu_forge_buyer.state_keys import (
+            APPROVED_STEPS_KEY,
+            PENDING_APPROVAL_KEY,
+            PR_STATUS_KEY,
+            PREVIOUS_PR_STATUS_KEY,
+        )
+
+        resume_table: dict[str, tuple[str, str]] = {
+            PrStatus.AWAITING_PO_APPROVAL.value: ("po", PrStatus.VENDOR_SELECTED.value),
+            PrStatus.AWAITING_GRN_APPROVAL.value: ("grn", PrStatus.PO_ACKNOWLEDGED.value),
+            PrStatus.AWAITING_COMPLETION_APPROVAL.value: (
+                "completion",
+                PrStatus.INVOICE_UNDER_VERIFICATION.value,
+            ),
+            # Legacy alias: pre-HITL sessions parked here go straight to PO_ISSUED
+            # (the old behavior).
+            PrStatus.AWAITING_USER_APPROVAL.value: ("po", PrStatus.PO_ISSUED.value),
+        }
 
         self._ensure_vertex_configured()
 
@@ -246,7 +264,8 @@ class WorkflowService:
             )
 
         current_status = session.state.get(PR_STATUS_KEY)
-        if current_status != PrStatus.AWAITING_USER_APPROVAL.value:
+        resume = resume_table.get(str(current_status) if current_status else "")
+        if resume is None:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=(
@@ -254,13 +273,25 @@ class WorkflowService:
                     f"Current status: {current_status!r}"
                 ),
             )
+        step, resume_status = resume
+
+        existing_approved = session.state.get(APPROVED_STEPS_KEY) or []
+        if not isinstance(existing_approved, list):
+            existing_approved = []
+        if step not in existing_approved:
+            next_approved = list(existing_approved) + [step]
+        else:
+            next_approved = list(existing_approved)
 
         state_event = Event(
+            invocation_id=f"approve-{uuid.uuid4().hex}",
             author="api:approve",
             actions=EventActions(
                 state_delta={
-                    PREVIOUS_PR_STATUS_KEY: PrStatus.AWAITING_USER_APPROVAL.value,
-                    PR_STATUS_KEY: PrStatus.PO_ISSUED.value,
+                    PREVIOUS_PR_STATUS_KEY: current_status,
+                    PR_STATUS_KEY: resume_status,
+                    APPROVED_STEPS_KEY: next_approved,
+                    PENDING_APPROVAL_KEY: None,
                 }
             ),
         )
@@ -277,18 +308,10 @@ class WorkflowService:
         )
 
         approved_at = datetime.now(timezone.utc)
-        if self._index_repo is not None:
-            await self._index_repo.update_fields(
-                workflow_id,
-                {
-                    "prStatus": PrStatus.PO_ISSUED.value,
-                    "needsAction": False,
-                },
-            )
 
         logger.info(
-            "workflow.approve  workflow_id=%s status=%s->PO_ISSUED",
-            workflow_id, current_status,
+            "workflow.approve  workflow_id=%s step=%s status=%s->%s",
+            workflow_id, step, current_status, resume_status,
         )
 
         response = WorkflowApproveResponse(workflow_id=workflow_id, approved_at=approved_at)
@@ -297,7 +320,107 @@ class WorkflowService:
             user_id=user_id,
             prompt=(
                 f"Continue procurement workflow {workflow_id}. "
-                "The PO has been approved — proceed with purchase_manager_agent."
+                f"The {step} step has been approved — proceed with purchase_manager_agent."
+            ),
+        )
+        return response, job
+
+    async def resolve_escalation(
+        self, workflow_id: str
+    ) -> tuple[WorkflowResolveEscalationResponse, AgentJob | None]:
+        """Restore pr_status after full-tier ESCALATED and re-kick the agent."""
+        from google.adk.events.event import Event
+        from google.adk.events.event_actions import EventActions
+        from google.adk.sessions import VertexAiSessionService
+
+        from procu_forge_buyer.pr_status import PrStatus
+        from procu_forge_buyer.pr_status_transitions import transition_resume_for_escalated
+        from procu_forge_buyer.state_keys import (
+            ESCALATION_CONTEXT_KEY,
+            ESCALATION_PENDING_NOTIFY_KEY,
+            PR_STATUS_KEY,
+            PREVIOUS_PR_STATUS_KEY,
+        )
+
+        self._ensure_vertex_configured()
+
+        session_service = VertexAiSessionService(
+            project=self._settings.vertex_project_id,
+            location=self._settings.vertex_location,
+        )
+        user_id = self._settings.workflow_default_user_id or ""
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="WORKFLOW_DEFAULT_USER_ID is not configured.",
+            )
+
+        session = await session_service.get_session(
+            app_name=self._settings.reasoning_engine_app_name,
+            user_id=user_id,
+            session_id=workflow_id,
+        )
+        if session is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Workflow '{workflow_id}' not found.",
+            )
+
+        state = session.state if isinstance(session.state, dict) else {}
+        current_status = str(state.get(PR_STATUS_KEY) or "")
+
+        if current_status != PrStatus.ESCALATED.value:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Workflow is not in ESCALATED status. Current status: {current_status!r}"
+                ),
+            )
+
+        mutable = dict(state)
+        if not transition_resume_for_escalated(mutable):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Cannot resolve escalation — previous pr_status missing.",
+            )
+        resume_status = str(mutable.get(PR_STATUS_KEY) or "")
+
+        resolved_at = datetime.now(timezone.utc)
+        state_event = Event(
+            invocation_id=f"resolve-escalation-{uuid.uuid4().hex}",
+            author="api:resolve_escalation",
+            actions=EventActions(
+                state_delta={
+                    PR_STATUS_KEY: resume_status,
+                    PREVIOUS_PR_STATUS_KEY: PrStatus.ESCALATED.value,
+                    ESCALATION_CONTEXT_KEY: None,
+                    ESCALATION_PENDING_NOTIFY_KEY: False,
+                }
+            ),
+        )
+        await session_service.append_event(session, state_event)
+
+        from api.services.workflow_query import build_workflow_detail
+        from api.ws import broadcast_state
+
+        broadcast_state(
+            workflow_id,
+            lambda: build_workflow_detail(workflow_id),
+            reason="resolve_escalation",
+            workflow_id=workflow_id,
+        )
+
+        response = WorkflowResolveEscalationResponse(
+            workflow_id=workflow_id,
+            resolved_at=resolved_at,
+            resumed_pr_status=resume_status or None,
+        )
+        job = AgentJob(
+            workflow_id=workflow_id,
+            user_id=user_id,
+            prompt=(
+                f"Continue procurement workflow {workflow_id}. "
+                f"Escalation was resolved — resume from pr_status {resume_status}."
             ),
         )
         return response, job
@@ -334,7 +457,9 @@ class WorkflowService:
         user_id: str,
         buyer_request: BuyerSessionRequestState,
         product: Product,
-    ) -> None:
+        *,
+        approval_required: bool = False,
+    ) -> dict:
         from google.adk.sessions import VertexAiSessionService
 
         session_service = VertexAiSessionService(
@@ -344,6 +469,7 @@ class WorkflowService:
         session_state = BuyerWorkflowSessionState(
             request=buyer_request,
             product=product,
+            approval_required=approval_required,
         ).to_vertex_state()
         try:
             await session_service.create_session(
@@ -361,6 +487,7 @@ class WorkflowService:
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="Failed to initialise the agent session. Please retry.",
             ) from exc
+        return session_state
 
     def _ensure_vertex_configured(self) -> None:
         missing: list[str] = []
@@ -385,35 +512,3 @@ class WorkflowService:
             "to repeat them unless something is missing from state."
         )
 
-    async def _write_index(
-        self,
-        *,
-        workflow_id: str,
-        request_id: str,
-        organization_id: str,
-        product_id: str,
-        product_name: str,
-        requester_id: str,
-        pr_status: str,
-        started_at: datetime,
-        vendor_count: int,
-        needs_action: bool,
-    ) -> None:
-        if self._index_repo is None:
-            return
-        now = datetime.now(timezone.utc)
-        entry = WorkflowIndexEntry(
-            id=workflow_id,
-            workflowId=workflow_id,
-            requestId=request_id,
-            organizationId=organization_id,
-            productId=product_id,
-            productName=product_name,
-            requesterId=requester_id,
-            prStatus=pr_status,
-            startedAt=started_at,
-            updatedAt=now,
-            vendorCount=vendor_count,
-            needsAction=needs_action,
-        )
-        await self._index_repo.upsert(entry)

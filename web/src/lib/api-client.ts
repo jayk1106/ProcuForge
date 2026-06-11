@@ -67,8 +67,30 @@ export async function searchProducts(q = '', limit = 20): Promise<ProductOption[
   return apiFetch<ProductOption[]>(`/api/v1/products${query ? `?${query}` : ''}`)
 }
 
-export async function getWorkflows(): Promise<WorkflowRow[]> {
-  return apiFetch<WorkflowRow[]>('/api/v1/workflow/list')
+export type WorkflowStatusFilter = 'all' | 'progress' | 'action' | 'completed' | 'walked'
+
+export interface PagedRows<T> {
+  items: T[]
+  nextCursor: string | null
+}
+
+export interface ListWorkflowsOptions {
+  cursor?: string | null
+  limit?: number
+  status?: WorkflowStatusFilter
+}
+
+export async function getWorkflows(
+  opts: ListWorkflowsOptions = {},
+): Promise<PagedRows<WorkflowRow>> {
+  const params = new URLSearchParams()
+  if (opts.cursor) params.set('cursor', opts.cursor)
+  if (opts.limit) params.set('limit', String(opts.limit))
+  if (opts.status && opts.status !== 'all') params.set('status', opts.status)
+  const query = params.toString()
+  return apiFetch<PagedRows<WorkflowRow>>(
+    `/api/v1/workflow/list${query ? `?${query}` : ''}`,
+  )
 }
 
 export async function getWorkflowDetail(id: string): Promise<ActiveFlow> {
@@ -93,6 +115,7 @@ export interface StartWorkflowPayload {
   requester_id?: string
   organization_id?: string
   buyer_notes?: string[]
+  approval_required?: boolean
 }
 
 export interface StartWorkflowResult {
@@ -118,12 +141,34 @@ export async function approveWorkflow(id: string): Promise<{ workflow_id: string
   )
 }
 
+export async function resolveWorkflowEscalation(
+  id: string
+): Promise<{ workflow_id: string; status: string; resumed_pr_status?: string | null }> {
+  return apiFetch<{ workflow_id: string; status: string; resumed_pr_status?: string | null }>(
+    `/api/v1/workflow/${id}/resolve-escalation`,
+    { method: 'POST' }
+  )
+}
+
 export async function getWorkflowState(id: string): Promise<Record<string, unknown>> {
   return apiFetch<Record<string, unknown>>(`/api/v1/workflow/${id}/state`)
 }
 
-export async function getVendorThreads(): Promise<Vendor[]> {
-  return apiFetch<Vendor[]>('/api/v1/vendor-threads')
+export interface ListVendorThreadsOptions {
+  cursor?: string | null
+  limit?: number
+}
+
+export async function getVendorThreads(
+  opts: ListVendorThreadsOptions = {},
+): Promise<PagedRows<Vendor>> {
+  const params = new URLSearchParams()
+  if (opts.cursor) params.set('cursor', opts.cursor)
+  if (opts.limit) params.set('limit', String(opts.limit))
+  const query = params.toString()
+  return apiFetch<PagedRows<Vendor>>(
+    `/api/v1/vendor-threads${query ? `?${query}` : ''}`,
+  )
 }
 
 export async function getVendorThread(rfqId: string): Promise<VendorConvo> {
@@ -140,19 +185,6 @@ export interface ThreadActionResponse {
 
 export async function getVendorThreadState(rfqId: string): Promise<Record<string, unknown>> {
   return apiFetch<Record<string, unknown>>(`/api/v1/vendor-threads/${rfqId}/state`)
-}
-
-export async function escalateVendorThread(
-  rfqId: string,
-  reason?: string
-): Promise<ThreadActionResponse> {
-  return apiFetch<ThreadActionResponse>(
-    `/api/v1/vendor-threads/${rfqId}/escalate`,
-    {
-      method: 'POST',
-      body: JSON.stringify({ reason: reason ?? null }),
-    }
-  )
 }
 
 export async function walkAwayVendorThread(

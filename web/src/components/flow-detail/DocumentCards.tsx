@@ -12,6 +12,41 @@ interface LineItem {
   [key: string]: unknown
 }
 
+export interface ApprovalCta {
+  reason: string
+  buttonLabel: string
+  onApprove: () => void
+  busy: boolean
+}
+
+export function ApprovalBanner({ approval }: { approval: ApprovalCta }) {
+  return (
+    <div
+      className="box box-pad box-tint"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        marginBottom: 12,
+        borderLeft: '3px solid var(--accent, #c08a3a)',
+      }}
+      role="alert"
+    >
+      <div className="t-xs upper muted">approval required</div>
+      <div className="t-sm">{approval.reason}</div>
+      <div>
+        <button
+          className="btn accent"
+          onClick={approval.onApprove}
+          disabled={approval.busy}
+        >
+          [ {approval.busy ? 'approving…' : approval.buttonLabel} ]
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function pickStr(obj: Record<string, unknown> | null | undefined, ...keys: string[]): string {
   if (!obj) return ''
   for (const k of keys) {
@@ -115,36 +150,56 @@ function DocCard({
   )
 }
 
-export function PoCard({ po }: { po: Record<string, unknown> }) {
+export function PoCard({
+  po,
+  approval,
+}: {
+  po: Record<string, unknown> | null
+  approval?: ApprovalCta
+}) {
   const total = pickNum(po, 'total_amount', 'agreed_price')
   const agreed = pickNum(po, 'agreed_price')
-  const fields: Field[] = [
-    { label: 'PO number', value: pickStr(po, 'po_number'), mono: true },
-    { label: 'RFQ ref', value: pickStr(po, 'rfq_reference'), mono: true },
-    { label: 'Vendor', value: pickStr(po, 'vendor_id'), mono: true },
-    { label: 'Total amount', value: total != null ? fmtMoney(total) : '', mono: true },
-    {
-      label: 'Agreed price',
-      value: agreed != null ? fmtMoney(agreed) : '',
-      mono: true,
-    },
-    { label: 'Delivery date', value: fmtDate(pickStr(po, 'delivery_date')) },
-  ]
-  return <DocCard fields={fields} items={lineItems(po)} />
+  const fields: Field[] = po
+    ? [
+        { label: 'PO number', value: pickStr(po, 'po_number'), mono: true },
+        { label: 'RFQ ref', value: pickStr(po, 'rfq_reference'), mono: true },
+        { label: 'Vendor', value: pickStr(po, 'vendor_id'), mono: true },
+        { label: 'Total amount', value: total != null ? fmtMoney(total) : '', mono: true },
+        {
+          label: 'Agreed price',
+          value: agreed != null ? fmtMoney(agreed) : '',
+          mono: true,
+        },
+        { label: 'Delivery date', value: fmtDate(pickStr(po, 'delivery_date')) },
+      ]
+    : []
+  return (
+    <>
+      {approval && <ApprovalBanner approval={approval} />}
+      <DocCard fields={fields} items={lineItems(po)} />
+    </>
+  )
 }
 
-export function GrnCard({ grn }: { grn: Record<string, unknown> }) {
-  const fields: Field[] = [
-    { label: 'GRN number', value: pickStr(grn, 'grn_number'), mono: true },
-    { label: 'PO number', value: pickStr(grn, 'po_number'), mono: true },
-    { label: 'Received at', value: fmtDate(pickStr(grn, 'received_at')) },
-  ]
+export function GrnCard({
+  grn,
+  approval,
+}: {
+  grn: Record<string, unknown> | null
+  approval?: ApprovalCta
+}) {
+  const fields: Field[] = grn
+    ? [
+        { label: 'GRN number', value: pickStr(grn, 'grn_number'), mono: true },
+        { label: 'PO number', value: pickStr(grn, 'po_number'), mono: true },
+        { label: 'Received at', value: fmtDate(pickStr(grn, 'received_at')) },
+      ]
+    : []
   return (
-    <DocCard
-      fields={fields}
-      items={lineItems(grn)}
-      itemMoneyKeys={new Set()}
-    />
+    <>
+      {approval && <ApprovalBanner approval={approval} />}
+      <DocCard fields={fields} items={lineItems(grn)} itemMoneyKeys={new Set()} />
+    </>
   )
 }
 

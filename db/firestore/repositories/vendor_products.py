@@ -54,7 +54,7 @@ class VendorProductRepository:
 
         return await asyncio.to_thread(_op)
 
-    async def list_active_by_product(self, product_id: str, *, limit: int = 3) -> list[VendorProduct]:
+    async def list_active_by_product(self, product_id: str, *, limit: int = 10) -> list[VendorProduct]:
         def _op() -> list[VendorProduct]:
             query = (
                 self._collection.where(filter=FieldFilter("productId", "==", product_id))

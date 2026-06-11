@@ -26,6 +26,10 @@ export interface VendorThread {
   who: 'them' | 'us'
   what: string
   meta: string
+  type?: string
+  round?: number | null
+  ts?: string | null
+  payload?: Record<string, unknown>
 }
 
 export interface ActiveVendor {
@@ -38,6 +42,8 @@ export interface ActiveVendor {
   status: 'NEGOTIATING' | 'WON' | 'LOST' | 'WALKED_AWAY'
   latest: number | null
   delta: number | null
+  target?: number | null
+  budget?: number | null
   moq: number
   lead: string
   escalated?: boolean
@@ -52,6 +58,17 @@ export interface ActivityItem {
 
 export type PhaseStatus = 'pending' | 'in_progress' | 'done' | 'walked'
 
+export interface VendorRelationSummary {
+  preferredVendor: boolean
+  relationshipStatus: string
+  relationshipStrength: number | null
+  averageDeliveryDelayDays: number | null
+  qualityScore: number | null
+  riskLevel: string | null
+  usuallyOffersDiscount: boolean | null
+  averageDiscountPercent: number | null
+}
+
 export interface DiscoveredVendor {
   offerId: string
   vendorId: string
@@ -64,6 +81,9 @@ export interface DiscoveredVendor {
   leadTimeDays: number | null
   contracted: boolean
   availabilityStatus: string
+  minimumOrderQty?: number
+  currencyMatchesRequest?: boolean
+  vendorRelation?: VendorRelationSummary | null
 }
 
 export interface ActiveFlow {
@@ -90,6 +110,30 @@ export interface ActiveFlow {
   grn?: Record<string, unknown> | null
   invoice?: Record<string, unknown> | null
   selectedVendor?: Record<string, unknown> | null
+  approvalRequired?: boolean
+  approvedSteps?: ApprovalStep[]
+  pendingApproval?: PendingApproval | null
+  escalationContext?: EscalationContext | null
+}
+
+export interface EscalationContext {
+  tier: 'notify_only' | 'full'
+  source: string
+  reason: string
+  triggerStatus?: string
+  phase?: string
+  vendorId?: string | null
+  rfqId?: string | null
+  triggeredAt?: string
+  recommendedAction?: string | null
+}
+
+export type ApprovalStep = 'po' | 'grn' | 'completion'
+
+export interface PendingApproval {
+  step: ApprovalStep
+  reason: string
+  requested_at?: string
 }
 
 export interface VendorConvoMessage {

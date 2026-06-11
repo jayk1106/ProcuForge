@@ -13,27 +13,41 @@ import asyncio
 import json
 import logging
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Protocol
 
 from google.adk.tools.base_tool import ToolContext
 
 from communication import A2AMessageBuilder
 from procu_forge_buyer.a2a_client import call_vendor
-from procu_forge_buyer.pr_status import PrStatus
+from procu_forge_buyer.escalation import maybe_escalate_full
+from procu_forge_buyer.pr_status_transitions import (
+    transition_to_awaiting_completion_approval,
+    transition_to_awaiting_grn_approval,
+    transition_to_awaiting_po_approval,
+    transition_to_invoice_correction_pending,
+    transition_to_po_rejected,
+)
 from procu_forge_buyer.purchase_a2a import (
+    is_po_rejection,
     parse_vendor_envelope,
     validate_invoice_submitted,
     validate_po_acknowledged,
     validate_process_complete_ack,
     vendor_error,
+    verify_invoice_against_po,
 )
 from procu_forge_buyer.state_keys import (
+    APPROVAL_REQUIRED_KEY,
+    APPROVED_STEPS_KEY,
     GRN_KEY,
+    INVOICE_CORRECTION_ROUNDS_KEY,
     INVOICE_KEY,
     INVOICE_VENDOR_ACK_KEY,
     NEGOTIATION_CONFIG_KEY,
+    PENDING_APPROVAL_KEY,
     PO_KEY,
+    PO_REJECTION_COUNT_KEY,
     PO_VENDOR_ACK_KEY,
     PR_STATUS_KEY,
     PROCESS_COMPLETE_KEY,
@@ -41,9 +55,18 @@ from procu_forge_buyer.state_keys import (
     REQUEST_KEY,
     RFQ_CLOSED_LOSERS_KEY,
     SELECTED_VENDOR_KEY,
+    WALKAWAY_LOSERS_KEY,
 )
 
-_LOG = logging.getLogger(__name__)
+# Approval-step constants (mirrored in APPROVED_STEPS_KEY).
+PO_STEP = "po"
+GRN_STEP = "grn"
+COMPLETION_STEP = "completion"
+
+logger = logging.getLogger(__name__)
+
+_PO_REJECT_ESCALATE_THRESHOLD = 2
+_INVOICE_CORRECTION_ESCALATE_THRESHOLD = 3
 
 
 def _broadcast_vendor_thread(
@@ -69,7 +92,7 @@ def _broadcast_vendor_thread(
             vendor_thread_id=rfq_id,
         )
     except Exception:
-        _LOG.exception(
+        logger.exception(
             "purchase_manager.broadcast_failed reason=%s rfq_id=%s",
             reason,
             config.get("rfq_id"),
@@ -83,6 +106,94 @@ class _StateReader(Protocol):
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
+
+def _as_dict(state: _StateReader, key: str) -> dict[str, Any]:
+    value = state.get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def _selected_vendor_label(state: _StateReader) -> str:
+    return str(_as_dict(state, SELECTED_VENDOR_KEY).get("vendor") or "the selected vendor")
+
+
+def _reason_for_step(step: str, state: _StateReader) -> str:
+    if step == PO_STEP:
+        vendor = _selected_vendor_label(state)
+        amount = _as_dict(state, PO_KEY).get("total_amount")
+        if amount:
+            return f"Approval required before sending PO to {vendor} (total {amount})."
+        return f"Approval required before sending PO to {vendor}."
+    if step == GRN_STEP:
+        po_number = _as_dict(state, PO_KEY).get("po_number")
+        if po_number:
+            return f"Approval required before sending GRN for PO {po_number}."
+        return "Approval required before sending GRN to the vendor."
+    if step == COMPLETION_STEP:
+        invoice_number = _as_dict(state, INVOICE_KEY).get("invoice_number")
+        if invoice_number:
+            return (
+                f"Approval required before closing the procurement for invoice {invoice_number}."
+            )
+        return "Approval required before closing the procurement."
+    return "Approval required before continuing."
+
+
+def _apply_gate_transition(state: Any, step: str) -> None:
+    if step == PO_STEP:
+        transition_to_awaiting_po_approval(state)
+    elif step == GRN_STEP:
+        transition_to_awaiting_grn_approval(state)
+    elif step == COMPLETION_STEP:
+        transition_to_awaiting_completion_approval(state)
+
+
+def resolve_next_purchase_step(state: _StateReader) -> str | None:
+    """Return the next purchase step that has not yet been vendor-confirmed."""
+    if not state.get(PO_VENDOR_ACK_KEY):
+        return PO_STEP
+    if not state.get(INVOICE_VENDOR_ACK_KEY):
+        return GRN_STEP
+    if not state.get(PROCESS_COMPLETE_VENDOR_ACK_KEY):
+        return COMPLETION_STEP
+    return None
+
+
+def maybe_apply_approval_gate(state: Any, *, step: str) -> dict[str, Any] | None:
+    """Park the workflow at ``AWAITING_<step>_APPROVAL`` if the policy demands it.
+
+    Returns a tool-style ``{ok: False, error: 'needs_approval', ...}`` dict when
+    the gate fires; the caller (a ``send_*`` tool or the before_agent_callback)
+    propagates that back to the agent, which stops the turn. The ``pr_router``
+    after-callback then sees the gated ``pr_status`` and escalates the loop.
+
+    No-op when ``approval_required`` is False or when ``step`` is already in
+    ``approved_steps``.
+    """
+    if not state.get(APPROVAL_REQUIRED_KEY):
+        return None
+    approved = state.get(APPROVED_STEPS_KEY) or []
+    if isinstance(approved, list) and step in approved:
+        return None
+
+    reason = _reason_for_step(step, state)
+    state[PENDING_APPROVAL_KEY] = {
+        "step": step,
+        "reason": reason,
+        "requested_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
+    _apply_gate_transition(state, step)
+    logger.info(
+        "purchase_manager.tool_gate step=%s pr_status=%s",
+        step,
+        state.get(PR_STATUS_KEY),
+    )
+    return {
+        "ok": False,
+        "error": "needs_approval",
+        "step": step,
+        "reason": reason,
+    }
+
 
 def _to_float(value: Any) -> float | None:
     try:
@@ -112,12 +223,11 @@ def _extract_agreed_price(communications: list[Any]) -> float | None:
     return None
 
 
-def _get_vendor_config(state: _StateReader) -> tuple[str, dict[str, Any]] | str:
+def get_vendor_config(state: _StateReader) -> tuple[str, dict[str, Any]] | str:
     """Return (vendor_id, negotiation_config) or an error string."""
-    selected = state.get(SELECTED_VENDOR_KEY)
-    if not isinstance(selected, dict):
+    if not isinstance(state.get(SELECTED_VENDOR_KEY), dict):
         return "selected_vendor missing from state"
-    vendor_id = str(selected.get("vendor") or "").strip()
+    vendor_id = _selected_vendor_id(state)
     if not vendor_id:
         return "selected_vendor.vendor is empty"
 
@@ -150,10 +260,7 @@ def _purchase_ack_snapshot(state: _StateReader) -> dict[str, bool]:
 
 
 def _selected_vendor_id(state: _StateReader) -> str:
-    selected = state.get(SELECTED_VENDOR_KEY)
-    if isinstance(selected, dict):
-        return str(selected.get("vendor") or "").strip()
-    return ""
+    return str(_as_dict(state, SELECTED_VENDOR_KEY).get("vendor") or "").strip()
 
 
 def _losing_vendor_ids(state: _StateReader) -> list[str]:
@@ -173,6 +280,48 @@ def _rfq_closed_losers(state: _StateReader) -> dict[str, bool]:
     return {str(k): bool(v) for k, v in raw.items() if v}
 
 
+def _walkaway_losers(state: _StateReader) -> dict[str, bool]:
+    raw = state.get(WALKAWAY_LOSERS_KEY) or {}
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k): bool(v) for k, v in raw.items() if v}
+
+
+def _last_buyer_message_type(communications: list[Any] | None) -> str | None:
+    """Return the message_type of the most recent buyer-originated envelope."""
+    if not isinstance(communications, list):
+        return None
+    for entry in reversed(communications):
+        env: dict[str, Any] | None = None
+        if isinstance(entry, dict):
+            env = entry
+        elif isinstance(entry, str):
+            try:
+                parsed = json.loads(entry)
+                if isinstance(parsed, dict):
+                    env = parsed
+            except json.JSONDecodeError:
+                continue
+        if env is None:
+            continue
+        if str(env.get("from_agent") or "") != "buyer_agent":
+            continue
+        mt = env.get("message_type")
+        return str(mt) if mt else None
+    return None
+
+
+def _needs_walkaway_before_close(config: dict[str, Any] | None) -> bool:
+    """A losing vendor needs WALKAWAY first iff buyer's last message was ACCEPT.
+
+    Other end-states (buyer WALKAWAY, vendor WALKAWAY) already closed the
+    thread semantically — RFQ_CLOSED alone is enough.
+    """
+    if not isinstance(config, dict):
+        return False
+    return _last_buyer_message_type(config.get("communications")) == "ACCEPT"
+
+
 def _all_losing_vendors_notified(state: _StateReader) -> bool:
     losing = _losing_vendor_ids(state)
     if not losing:
@@ -187,10 +336,11 @@ def purchase_progress_snapshot(state: _StateReader) -> dict[str, Any]:
         "pr_status": state.get(PR_STATUS_KEY),
         "acks": _purchase_ack_snapshot(state),
         "rfq_closed_losers": sorted(_rfq_closed_losers(state).keys()),
+        "walkaway_losers": sorted(_walkaway_losers(state).keys()),
     }
 
 
-def _purchase_made_progress(before: dict[str, Any], after: dict[str, Any]) -> bool:
+def purchase_made_progress(before: dict[str, Any], after: dict[str, Any]) -> bool:
     if before.get("pr_status") != after.get("pr_status"):
         return True
     before_acks = before.get("acks") or {}
@@ -199,7 +349,11 @@ def _purchase_made_progress(before: dict[str, Any], after: dict[str, Any]) -> bo
         return True
     before_closed = set(before.get("rfq_closed_losers") or [])
     after_closed = set(after.get("rfq_closed_losers") or [])
-    return len(after_closed) > len(before_closed)
+    if len(after_closed) > len(before_closed):
+        return True
+    before_walk = set(before.get("walkaway_losers") or [])
+    after_walk = set(after.get("walkaway_losers") or [])
+    return len(after_walk) > len(before_walk)
 
 
 def _build_po_envelope(
@@ -235,7 +389,7 @@ def _build_grn_envelope(
 
 def build_purchase_progress(state: _StateReader) -> dict[str, Any]:
     """Synchronous progress payload — used by the instruction provider and tests."""
-    result = _get_vendor_config(state)
+    result = get_vendor_config(state)
     rfq_id = None
     vendor_id = None
     if isinstance(result, tuple):
@@ -243,22 +397,22 @@ def build_purchase_progress(state: _StateReader) -> dict[str, Any]:
         rfq_id = config.get("rfq_id")
 
     acks = _purchase_ack_snapshot(state)
-    po = state.get(PO_KEY) if isinstance(state.get(PO_KEY), dict) else {}
-    grn = state.get(GRN_KEY) if isinstance(state.get(GRN_KEY), dict) else {}
-    invoice = state.get(INVOICE_KEY) if isinstance(state.get(INVOICE_KEY), dict) else {}
+    po = _as_dict(state, PO_KEY)
+    grn = _as_dict(state, GRN_KEY)
+    invoice = _as_dict(state, INVOICE_KEY)
     losing = _losing_vendor_ids(state)
     closed = _rfq_closed_losers(state)
+    walked = _walkaway_losers(state)
 
     return {
         "pr_status": state.get(PR_STATUS_KEY),
-        "selected_vendor": (state.get(SELECTED_VENDOR_KEY) or {}).get("vendor")
-        if isinstance(state.get(SELECTED_VENDOR_KEY), dict)
-        else None,
+        "selected_vendor": _as_dict(state, SELECTED_VENDOR_KEY).get("vendor"),
         "rfq_id": rfq_id,
         "vendor_id": vendor_id,
         "rfq_closed": {
             "losing_vendor_ids": losing,
             "notified_vendor_ids": sorted(closed.keys()),
+            "walkaway_vendor_ids": sorted(walked.keys()),
             "all_notified": _all_losing_vendors_notified(state),
         },
         "steps": {
@@ -291,7 +445,11 @@ async def send_po(tool_context: ToolContext) -> dict[str, Any]:
     envelope (same ``po_number``) is rebuilt and re-sent. RFQ_CLOSED is
     idempotent per loser (tracked via ``rfq_closed_losers``).
     """
-    result = _get_vendor_config(tool_context.state)
+    gated = maybe_apply_approval_gate(tool_context.state, step=PO_STEP)
+    if gated is not None:
+        return gated
+
+    result = get_vendor_config(tool_context.state)
     if isinstance(result, str):
         return {"ok": False, "error": result}
     vendor_id, config = result
@@ -310,7 +468,7 @@ async def send_po(tool_context: ToolContext) -> dict[str, Any]:
     existing_po = tool_context.state.get(PO_KEY)
     if isinstance(existing_po, dict) and existing_po.get("po_number"):
         po_record = dict(existing_po)
-        _LOG.info(
+        logger.info(
             "purchase_manager send_po retry  vendor_id=%s po_number=%s",
             vendor_id,
             po_record.get("po_number"),
@@ -359,26 +517,26 @@ async def send_po(tool_context: ToolContext) -> dict[str, Any]:
     builder = _make_builder(config, vendor_id)
     envelope = _build_po_envelope(builder, po_record=po_record)
 
-    _LOG.info(
+    logger.info(
         "purchase_manager send_po  vendor_id=%s po_number=%s total_amount=%s",
         vendor_id,
         po_record["po_number"],
         po_record.get("total_amount"),
     )
 
-    _LOG.debug("purchase_manager send_po envelope %s", envelope)
+    logger.debug("purchase_manager send_po envelope %s", envelope)
 
     try:
         reply = await call_vendor(json.dumps(envelope), config["rfq_id"])
     except Exception as exc:
-        _LOG.exception(
+        logger.exception(
             "purchase_manager send_po a2a_failed  vendor_id=%s rfq_id=%s",
             vendor_id,
             config["rfq_id"],
         )
         return {"ok": False, "error": f"vendor A2A call failed: {exc}"}
 
-    _LOG.debug("purchase_manager send_po reply_chars=%d", len(reply or ""))
+    logger.debug("purchase_manager send_po reply_chars=%d", len(reply or ""))
 
     ack_env = parse_vendor_envelope(reply)
     if ack_env is None:
@@ -391,6 +549,18 @@ async def send_po(tool_context: ToolContext) -> dict[str, Any]:
 
     validation_err = validate_po_acknowledged(ack_env, expected_po_number=po_record["po_number"])
     if validation_err:
+        if is_po_rejection(ack_env):
+            count = int(tool_context.state.get(PO_REJECTION_COUNT_KEY) or 0) + 1
+            tool_context.state[PO_REJECTION_COUNT_KEY] = count
+            transition_to_po_rejected(tool_context.state)
+            if count >= _PO_REJECT_ESCALATE_THRESHOLD:
+                maybe_escalate_full(
+                    tool_context.state,
+                    source="po_rejected",
+                    reason=validation_err,
+                    vendor_id=vendor_id,
+                    rfq_id=config.get("rfq_id"),
+                )
         return {
             "ok": False,
             "error": validation_err,
@@ -415,7 +585,11 @@ async def send_grn_created(tool_context: ToolContext) -> dict[str, Any]:
     A2A call so retries reuse the same identifier. Vendor matches GRN by
     ``po_number`` so the resend is idempotent.
     """
-    result = _get_vendor_config(tool_context.state)
+    gated = maybe_apply_approval_gate(tool_context.state, step=GRN_STEP)
+    if gated is not None:
+        return gated
+
+    result = get_vendor_config(tool_context.state)
     if isinstance(result, str):
         return {"ok": False, "error": result}
     vendor_id, config = result
@@ -439,7 +613,7 @@ async def send_grn_created(tool_context: ToolContext) -> dict[str, Any]:
     existing_grn = tool_context.state.get(GRN_KEY)
     if isinstance(existing_grn, dict) and existing_grn.get("grn_number"):
         grn_record = dict(existing_grn)
-        _LOG.info(
+        logger.info(
             "purchase_manager send_grn retry  vendor_id=%s grn_number=%s po_number=%s",
             vendor_id,
             grn_record.get("grn_number"),
@@ -461,25 +635,25 @@ async def send_grn_created(tool_context: ToolContext) -> dict[str, Any]:
     builder = _make_builder(config, vendor_id)
     envelope = _build_grn_envelope(builder, grn_record=grn_record)
 
-    _LOG.info(
+    logger.info(
         "purchase_manager send_grn  vendor_id=%s grn_number=%s po_number=%s",
         vendor_id,
         grn_record["grn_number"],
         po_number,
     )
 
-    _LOG.debug("purchase_manager send_grn envelope %s", envelope)
+    logger.debug("purchase_manager send_grn envelope %s", envelope)
     try:
         reply = await call_vendor(json.dumps(envelope), config["rfq_id"])
     except Exception as exc:
-        _LOG.exception(
+        logger.exception(
             "purchase_manager send_grn a2a_failed  vendor_id=%s rfq_id=%s",
             vendor_id,
             config["rfq_id"],
         )
         return {"ok": False, "error": f"vendor A2A call failed: {exc}"}
 
-    _LOG.debug("purchase_manager send_grn reply_chars=%d", len(reply or ""))
+    logger.debug("purchase_manager send_grn reply_chars=%d", len(reply or ""))
     inv_env = parse_vendor_envelope(reply)
     if inv_env is None:
         return {
@@ -500,6 +674,27 @@ async def send_grn_created(tool_context: ToolContext) -> dict[str, Any]:
             "vendor_reply": inv_env,
         }
 
+    mismatches = verify_invoice_against_po(invoice_payload, po)
+    if mismatches:
+        rounds = int(tool_context.state.get(INVOICE_CORRECTION_ROUNDS_KEY) or 0) + 1
+        tool_context.state[INVOICE_CORRECTION_ROUNDS_KEY] = rounds
+        transition_to_invoice_correction_pending(tool_context.state)
+        mismatch_detail = "; ".join(mismatches)
+        if rounds >= _INVOICE_CORRECTION_ESCALATE_THRESHOLD:
+            maybe_escalate_full(
+                tool_context.state,
+                source="invoice_mismatch",
+                reason=f"Invoice failed 3-way match after {rounds} correction rounds: {mismatch_detail}",
+                vendor_id=vendor_id,
+                rfq_id=config.get("rfq_id"),
+            )
+        return {
+            "ok": False,
+            "error": f"invoice mismatch (round {rounds}): {mismatch_detail}",
+            "vendor_reply": inv_env,
+            "correction_round": rounds,
+        }
+
     tool_context.state[INVOICE_KEY] = invoice_payload
     tool_context.state[INVOICE_VENDOR_ACK_KEY] = inv_env
     _broadcast_vendor_thread(tool_context, config, reason="grn_sent")
@@ -517,7 +712,11 @@ async def send_process_complete(tool_context: ToolContext) -> dict[str, Any]:
     No new identifier is minted — references existing po/grn/invoice numbers —
     so this tool is naturally retry-safe.
     """
-    result = _get_vendor_config(tool_context.state)
+    gated = maybe_apply_approval_gate(tool_context.state, step=COMPLETION_STEP)
+    if gated is not None:
+        return gated
+
+    result = get_vendor_config(tool_context.state)
     if isinstance(result, str):
         return {"ok": False, "error": result}
     vendor_id, config = result
@@ -526,12 +725,15 @@ async def send_process_complete(tool_context: ToolContext) -> dict[str, Any]:
         return {"ok": False, "error": "invoice not vendor-confirmed — send_grn_created must succeed first"}
 
     if tool_context.state.get(PROCESS_COMPLETE_VENDOR_ACK_KEY):
-        pc = dict(tool_context.state.get(PROCESS_COMPLETE_KEY) or {})
-        return {"ok": True, "note": "already_complete", "process_complete": pc}
+        return {
+            "ok": True,
+            "note": "already_complete",
+            "process_complete": _as_dict(tool_context.state, PROCESS_COMPLETE_KEY),
+        }
 
-    po_number = (tool_context.state.get(PO_KEY) or {}).get("po_number") or ""
-    grn_number = (tool_context.state.get(GRN_KEY) or {}).get("grn_number") or ""
-    invoice_number = (tool_context.state.get(INVOICE_KEY) or {}).get("invoice_number") or ""
+    po_number = _as_dict(tool_context.state, PO_KEY).get("po_number") or ""
+    grn_number = _as_dict(tool_context.state, GRN_KEY).get("grn_number") or ""
+    invoice_number = _as_dict(tool_context.state, INVOICE_KEY).get("invoice_number") or ""
 
     if not po_number:
         return {"ok": False, "error": "po_number missing — send_po must succeed first"}
@@ -547,7 +749,7 @@ async def send_process_complete(tool_context: ToolContext) -> dict[str, Any]:
         invoice_number=invoice_number,
     )
 
-    _LOG.info(
+    logger.info(
         "purchase_manager send_process_complete  vendor_id=%s po=%s grn=%s inv=%s",
         vendor_id,
         po_number,
@@ -558,7 +760,7 @@ async def send_process_complete(tool_context: ToolContext) -> dict[str, Any]:
     try:
         reply = await call_vendor(json.dumps(envelope), config["rfq_id"])
     except Exception as exc:
-        _LOG.exception(
+        logger.exception(
             "purchase_manager send_process_complete a2a_failed  vendor_id=%s rfq_id=%s",
             vendor_id,
             config["rfq_id"],
@@ -620,12 +822,183 @@ async def _call_rfq_closed_with_retry(envelope_json: str, rfq_id: str) -> tuple[
     return reply, parsed, err
 
 
-async def _notify_losing_vendors(state: Any) -> dict[str, Any]:
-    """Send RFQ_CLOSED to every losing vendor that hasn't yet been notified.
+def _parse_walkaway_reply(reply: str) -> tuple[dict[str, Any] | None, str | None]:
+    """Return (parsed_ack, error) when a vendor acknowledged a WALKAWAY.
 
-    Called from inside ``send_po``. Idempotent per vendor: a vendor is marked
-    closed when its reply is a successful RFQ_CLOSED ack (full envelope or
-    vendor short-circuit ``ok: true``). ``state`` is the live ADK session state.
+    Vendor side returns a WALKAWAY envelope (BUYER_WALKAWAY_ACKNOWLEDGED) or,
+    when its message-id dedupe kicks in on a retry, a plain ``{ok: true}`` ack.
+    """
+    parsed = parse_vendor_envelope(reply)
+    if parsed is None:
+        if not (reply or "").strip():
+            return None, "empty vendor reply"
+        return None, "vendor reply was not parseable JSON"
+    err = vendor_error(parsed)
+    if err:
+        return None, err
+    if parsed.get("ok") is True:
+        return parsed, None
+    if parsed.get("message_type") == "WALKAWAY":
+        return parsed, None
+    return None, "vendor did not acknowledge WALKAWAY"
+
+
+async def _call_walkaway_with_retry(envelope_json: str, rfq_id: str) -> tuple[str, dict[str, Any] | None, str | None]:
+    """Call vendor for WALKAWAY; retry once on empty reply."""
+    reply = await call_vendor(envelope_json, rfq_id)
+    parsed, err = _parse_walkaway_reply(reply)
+    if parsed is not None or (reply or "").strip():
+        return reply, parsed, err
+    await asyncio.sleep(0.5)
+    reply = await call_vendor(envelope_json, rfq_id)
+    parsed, err = _parse_walkaway_reply(reply)
+    return reply, parsed, err
+
+
+async def _send_walkaway_to_accepted_loser(
+    state: Any,
+    *,
+    vendor_id: str,
+    config: dict[str, Any],
+    nego: dict[str, Any],
+    walkaway_map: dict[str, bool],
+) -> dict[str, Any]:
+    """Phase 1 for accepted-but-not-selected vendors: send a buyer WALKAWAY.
+
+    Mirrors the negotiator's outbound layout — increment round, append the
+    envelope and the vendor's reply to ``communications`` — so that
+    :func:`infer_vendor_thread_status` reports ``WALKED_AWAY`` once both
+    entries land.
+    """
+    rfq_id = str(config.get("rfq_id") or "")
+    if not rfq_id:
+        return {"ok": False, "error": "no rfq_id in negotiation_config"}
+
+    try:
+        round_num = int(config.get("round") or 0) + 1
+    except (TypeError, ValueError):
+        round_num = 1
+
+    # Last accepted price gives the vendor the price we were closing at —
+    # useful context for their own status log even though we're walking away.
+    communications = list(config.get("communications") or [])
+    last_price = _extract_agreed_price(communications)
+
+    builder = _make_builder(config, vendor_id)
+    envelope = builder.get_walkaway_payload(
+        walkaway_reason="ANOTHER_VENDOR_SELECTED",
+        negotiation_round=round_num,
+        last_unit_price=last_price,
+    )
+
+    # Persist the outbound BEFORE the A2A call so a mid-call crash leaves the
+    # buyer-side state consistent with what the vendor saw.
+    communications.append(envelope)
+    config["communications"] = communications
+    config["round"] = round_num
+    nego[vendor_id] = config
+    state[NEGOTIATION_CONFIG_KEY] = nego
+
+    try:
+        reply, parsed, err = await _call_walkaway_with_retry(
+            json.dumps(envelope), rfq_id
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "purchase_manager walkaway_failed  vendor_id=%s error=%s",
+            vendor_id,
+            exc,
+        )
+        return {"ok": False, "error": str(exc)}
+
+    if parsed is None:
+        return {
+            "ok": False,
+            "error": err or "WALKAWAY not acknowledged",
+            "vendor_reply": reply[:500] if isinstance(reply, str) else reply,
+        }
+
+    communications.append(parsed)
+    config["communications"] = communications
+    config["done"] = True
+    nego[vendor_id] = config
+    state[NEGOTIATION_CONFIG_KEY] = nego
+
+    walkaway_map[vendor_id] = True
+    state[WALKAWAY_LOSERS_KEY] = walkaway_map
+
+    logger.info(
+        "purchase_manager walkaway_sent  vendor_id=%s rfq_id=%s round=%s",
+        vendor_id,
+        rfq_id,
+        round_num,
+    )
+    return {"ok": True, "reply": parsed}
+
+
+async def _send_rfq_closed(
+    state: Any,
+    *,
+    vendor_id: str,
+    config: dict[str, Any],
+    closed_map: dict[str, bool],
+) -> dict[str, Any]:
+    """Phase 2: send RFQ_CLOSED to a losing vendor. Does not touch communications."""
+    rfq_id = str(config.get("rfq_id") or "")
+    if not rfq_id:
+        return {"ok": False, "error": "no rfq_id in negotiation_config"}
+
+    try:
+        builder = _make_builder(config, vendor_id)
+        envelope = builder.get_rfq_closed_payload(
+            outcome="NOT_SELECTED",
+            reason="ANOTHER_VENDOR_SELECTED",
+        )
+        reply, parsed, err = await _call_rfq_closed_with_retry(
+            json.dumps(envelope), rfq_id
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "purchase_manager rfq_closed_failed  vendor_id=%s error=%s",
+            vendor_id,
+            exc,
+        )
+        return {"ok": False, "error": str(exc)}
+
+    if parsed is None:
+        return {
+            "ok": False,
+            "error": err or "RFQ_CLOSED not acknowledged",
+            "vendor_reply": reply[:500] if isinstance(reply, str) else reply,
+        }
+
+    closed_map[vendor_id] = True
+    state[RFQ_CLOSED_LOSERS_KEY] = closed_map
+
+    logger.info(
+        "purchase_manager rfq_closed_sent  vendor_id=%s rfq_id=%s",
+        vendor_id,
+        rfq_id,
+    )
+    return {"ok": True, "reply": parsed}
+
+
+async def _notify_losing_vendors(state: Any) -> dict[str, Any]:
+    """Close out every losing vendor before the PO is sent to the winner.
+
+    Two-phase per vendor:
+
+    * If the vendor's last buyer message was ``ACCEPT`` (the buyer accepted
+      their offer but the decision agent then picked a cheaper ACCEPTED vendor),
+      send a buyer ``WALKAWAY`` first so the vendor's thread closes as
+      ``BUYER_WALKED_AWAY`` and the buyer-side status projection reads
+      ``WALKED_AWAY`` instead of ``REJECTED``.
+    * Then send ``RFQ_CLOSED`` to every losing vendor regardless of how their
+      negotiation ended.
+
+    Idempotent per phase: ``walkaway_losers`` and ``rfq_closed_losers`` track
+    each step independently so a mid-flight crash resumes from the right
+    phase without re-sending an already-acked envelope.
     """
     selected_vendor_id = _selected_vendor_id(state)
     if not selected_vendor_id:
@@ -641,54 +1014,60 @@ async def _notify_losing_vendors(state: Any) -> dict[str, Any]:
             "closed": {},
             "note": "all_losing_vendors_already_notified",
             "notified_vendor_ids": sorted(_rfq_closed_losers(state).keys()),
+            "walkaway_vendor_ids": sorted(_walkaway_losers(state).keys()),
         }
 
     nego: dict[str, Any] = dict(state.get(NEGOTIATION_CONFIG_KEY) or {})
     closed_map: dict[str, bool] = dict(_rfq_closed_losers(state))
+    walkaway_map: dict[str, bool] = dict(_walkaway_losers(state))
     results: dict[str, Any] = {}
     pending = [vid for vid in losing_vendor_ids if not closed_map.get(vid)]
 
     for vendor_id in pending:
         config = nego.get(vendor_id) or {}
-        rfq_id = config.get("rfq_id") or ""
-        if not rfq_id:
-            results[vendor_id] = {"ok": False, "error": "no rfq_id in negotiation_config"}
-            continue
-        try:
-            builder = _make_builder(config, vendor_id)
-            envelope = builder.get_rfq_closed_payload(
-                outcome="NOT_SELECTED",
-                reason="ANOTHER_VENDOR_SELECTED",
-            )
-            reply, parsed, err = await _call_rfq_closed_with_retry(
-                json.dumps(envelope),
-                rfq_id,
-            )
-        except Exception as exc:  # noqa: BLE001
-            _LOG.warning(
-                "purchase_manager rfq_closed_failed  vendor_id=%s error=%s",
-                vendor_id,
-                exc,
-            )
-            results[vendor_id] = {"ok": False, "error": str(exc)}
-            continue
-
-        if parsed is None:
+        if not config.get("rfq_id"):
             results[vendor_id] = {
                 "ok": False,
-                "error": err or "RFQ_CLOSED not acknowledged",
-                "vendor_reply": reply[:500] if isinstance(reply, str) else reply,
+                "error": "no rfq_id in negotiation_config",
             }
             continue
 
-        closed_map[vendor_id] = True
-        state[RFQ_CLOSED_LOSERS_KEY] = closed_map
-        results[vendor_id] = {"ok": True, "reply": parsed}
-        _LOG.info(
-            "purchase_manager rfq_closed_sent  vendor_id=%s rfq_id=%s",
-            vendor_id,
-            rfq_id,
+        vendor_result: dict[str, Any] = {"ok": True}
+
+        # Phase 1: WALKAWAY first when the buyer's last word was ACCEPT.
+        if _needs_walkaway_before_close(config) and not walkaway_map.get(vendor_id):
+            walk_result = await _send_walkaway_to_accepted_loser(
+                state,
+                vendor_id=vendor_id,
+                config=config,
+                nego=nego,
+                walkaway_map=walkaway_map,
+            )
+            vendor_result["walkaway"] = walk_result
+            if not walk_result.get("ok"):
+                vendor_result["ok"] = False
+                results[vendor_id] = vendor_result
+                continue
+            # Re-read the (possibly mutated) config for Phase 2.
+            config = nego.get(vendor_id) or config
+        elif walkaway_map.get(vendor_id):
+            vendor_result["walkaway"] = {
+                "ok": True,
+                "note": "already_walked_away",
+                "skipped": True,
+            }
+
+        # Phase 2: RFQ_CLOSED for everyone.
+        close_result = await _send_rfq_closed(
+            state,
+            vendor_id=vendor_id,
+            config=config,
+            closed_map=closed_map,
         )
+        vendor_result["rfq_closed"] = close_result
+        if not close_result.get("ok"):
+            vendor_result["ok"] = False
+        results[vendor_id] = vendor_result
 
     for vendor_id in losing_vendor_ids:
         if vendor_id not in results and closed_map.get(vendor_id):
@@ -706,6 +1085,7 @@ async def _notify_losing_vendors(state: Any) -> dict[str, Any]:
         "ok": all_ok,
         "closed": results,
         "notified_vendor_ids": sorted(closed_map.keys()),
+        "walkaway_vendor_ids": sorted(walkaway_map.keys()),
         "all_notified": _all_losing_vendors_notified(state),
     }
 
@@ -713,12 +1093,14 @@ async def _notify_losing_vendors(state: Any) -> dict[str, Any]:
 __all__ = [
     "build_purchase_progress",
     "purchase_progress_snapshot",
-    "_purchase_made_progress",
-    "_notify_losing_vendors",
+    "purchase_made_progress",
     "send_po",
     "send_grn_created",
     "send_process_complete",
-    "_get_vendor_config",
-    "_all_losing_vendors_notified",
-    "_purchase_ack_snapshot",
+    "get_vendor_config",
+    "PO_STEP",
+    "GRN_STEP",
+    "COMPLETION_STEP",
+    "maybe_apply_approval_gate",
+    "resolve_next_purchase_step",
 ]

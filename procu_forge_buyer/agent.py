@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 from google.adk.agents import Agent, LoopAgent
 
-from adk_vertex_model import vertex_flash_model
+from adk_vertex_model import vertex_flash_llm
 
 from .logging_config import configure_buyer_logging
 from .callbacks import (
@@ -11,6 +11,8 @@ from .callbacks import (
     manage_log_before_pr_router,
     repair_purchase_status_callback,
     stop_loop_if_terminal,
+    track_loop_iteration,
+    detect_loop_exhaustion,
 )
 from .subagents.vendor_search import vendor_search_agent
 from .subagents.negotiator import negotiator_agent
@@ -54,6 +56,9 @@ Authoritative lifecycle: **docs/request_status.md**.
   ``purchase_manager_agent``.
 - **AWAITING_USER_APPROVAL** — **transfer_to_agent** ``purchase_manager_agent`` (legacy;
   advances to **PO_ISSUED** automatically).
+- **AWAITING_PO_APPROVAL**, **AWAITING_GRN_APPROVAL**, **AWAITING_COMPLETION_APPROVAL** —
+  Do not delegate; HITL gate. The loop stops via **pr_status** until the API
+  approve endpoint flips the status back to the active value.
 - **AWAITING_DELIVERY**, **GOODS_RECEIVED**, **AWAITING_INVOICE**,
   **INVOICE_CORRECTION_PENDING**, **INVOICE_VERIFIED**, **PO_REJECTED** — Do not delegate;
   human gate or external trigger required (**pr_status** stops the loop).
@@ -82,7 +87,7 @@ pr_router = Agent(
         "Terminal and human-gated states rely on pr_status, not exit_loop."
     ),
     instruction=PR_ROUTER_INSTRUCTION,
-    model=vertex_flash_model(),
+    model=vertex_flash_llm(),
     sub_agents=[
         vendor_search_agent,
         negotiator_agent,
@@ -108,8 +113,8 @@ root_agent = LoopAgent(
     ),
     sub_agents=[pr_router],
     max_iterations=25,
-    before_agent_callback=manage_log_before_orchestrator,
-    after_agent_callback=manage_log_after_orchestrator,
+    before_agent_callback=[track_loop_iteration, manage_log_before_orchestrator],
+    after_agent_callback=[manage_log_after_orchestrator, detect_loop_exhaustion],
 )
 
 configure_buyer_logging()

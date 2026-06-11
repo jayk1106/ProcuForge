@@ -68,7 +68,6 @@ class AgentEngineApp(AdkApp):
         )
         provider.add_span_processor(processor)
         trace.set_tracer_provider(provider)
-        self.enable_tracing = True
 
     def register_feedback(self, feedback: dict[str, Any]) -> None:
         """Validate and log user feedback as a structured Cloud Logging entry."""
@@ -122,6 +121,7 @@ def deploy_agent_engine_app(
     env_vars: dict[str, str] = {
         "NUM_WORKERS": "1",
         "AGENT_SERVICE_NAME": deployment_config.agent_name,
+        "GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY": "true",
     }
 
     # Per-agent artifacts bucket so buyer and vendor never collide.
@@ -151,6 +151,7 @@ def deploy_agent_engine_app(
 
     agent_engine = AgentEngineApp(
         agent=root_agent,
+        enable_tracing=True,
         artifact_service_builder=lambda: GcsArtifactService(
             bucket_name=artifacts_bucket_name
         ),

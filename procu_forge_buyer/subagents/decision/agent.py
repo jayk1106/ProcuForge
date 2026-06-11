@@ -1,6 +1,6 @@
 from google.adk.agents import Agent
 
-from adk_vertex_model import vertex_flash_model
+from adk_vertex_model import vertex_flash_llm
 
 from .tools import select_vendor
 
@@ -74,6 +74,6 @@ decision_agent = Agent(
     name="decision_agent",
     description="Selects the winning vendor from negotiation outcomes and stores the decision.",
     instruction=DECISION_INSTRUCTION,
-    model=vertex_flash_model(),
+    model=vertex_flash_llm(),
     tools=[select_vendor],
 )

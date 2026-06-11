@@ -10,9 +10,11 @@ class LoginRequest(BaseModel):
 
 
 class OrgAddress(BaseModel):
+    address: str = ""
     country: str
     state: str
     city: str
+    pincode: str = ""
 
 
 class AdminUserProfile(BaseModel):

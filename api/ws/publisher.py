@@ -85,12 +85,16 @@ def broadcast_state(
     reason: str,
     workflow_id: str | None = None,
     vendor_thread_id: str | None = None,
+    immediate: bool = False,
 ) -> None:
     """Schedule a ``state_changed`` push on ``channel``. Never raises.
 
     Thin wrapper around :meth:`ConnectionManager.broadcast_state`. The
     factory is invoked only if the channel has subscribers and the debounce
     window allows it — so unwatched workflows pay no DTO-build cost.
+
+    ``immediate=True`` flushes past the 100ms debounce so the frame is sent
+    distinct from the next broadcast on this channel.
     """
     try:
         manager.broadcast_state(
@@ -99,6 +103,7 @@ def broadcast_state(
             reason=reason,
             workflow_id=workflow_id,
             vendor_thread_id=vendor_thread_id,
+            immediate=immediate,
         )
     except Exception:
         logger.exception(

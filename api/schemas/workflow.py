@@ -90,6 +90,14 @@ class WorkflowStartRequest(BaseModel):
         pattern=r"^[A-Za-z]{3}$",
         description="ISO 4217 currency code.",
     )
+    approval_required: bool = Field(
+        default=False,
+        description=(
+            "When True, the buyer agent pauses for human approval before each "
+            "of PO, GRN, and PROCESS_COMPLETE. Resume via "
+            "POST /workflow/{id}/approve."
+        ),
+    )
 
     @field_validator("organization_id", "requester_id", "purpose", mode="before")
     @classmethod
@@ -184,3 +192,10 @@ class WorkflowApproveResponse(BaseModel):
     workflow_id: str
     status: Literal["approved"] = "approved"
     approved_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class WorkflowResolveEscalationResponse(BaseModel):
+    workflow_id: str
+    status: Literal["resolved"] = "resolved"
+    resolved_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    resumed_pr_status: str | None = None

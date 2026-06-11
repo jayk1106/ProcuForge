@@ -1,12 +1,14 @@
 'use client'
-import React from 'react'
-import { useRouter } from 'next/navigation'
+import React, { useState } from 'react'
 import { StatusPill } from '@/components/primitives/StatusPill'
 import { fmtMoney, fmtDelta } from '@/lib/format'
-import type { ActiveVendor } from '@/types'
+import type { ActiveVendor, VendorThread } from '@/types'
+import { StepDetailModal } from './StepDetailModal'
 
 interface NegotiationBoardProps {
   vendors: ActiveVendor[]
+  onResolveEscalation?: () => void
+  resolvingEscalation?: boolean
 }
 
 function NegotiationStatus({ v }: { v: ActiveVendor }) {
@@ -17,13 +19,17 @@ function NegotiationStatus({ v }: { v: ActiveVendor }) {
   return <StatusPill kind="go">negotiating</StatusPill>
 }
 
-export function NegotiationBoard({ vendors }: NegotiationBoardProps) {
-  const router = useRouter()
+interface SelectedStep {
+  vendor: ActiveVendor
+  turn: VendorThread
+}
 
-  function openConvo(v: ActiveVendor) {
-    const target = v.rfqId ?? v.id
-    router.push(`/vendors/${target}`)
-  }
+export function NegotiationBoard({
+  vendors,
+  onResolveEscalation,
+  resolvingEscalation = false,
+}: NegotiationBoardProps) {
+  const [selectedStep, setSelectedStep] = useState<SelectedStep | null>(null)
 
   return (
     <div className="neg-board">
@@ -48,6 +54,10 @@ export function NegotiationBoard({ vendors }: NegotiationBoardProps) {
           <div className="neg-summary">
             <div className="k">round</div>
             <div className="v">{v.round}</div>
+            <div className="k">target</div>
+            <div className="v">{v.target != null ? fmtMoney(v.target) : '—'}</div>
+            <div className="k">budget per unit</div>
+            <div className="v">{v.budget != null ? fmtMoney(v.budget) : '—'}</div>
             <div className="k">latest offer</div>
             <div className="v">{v.latest != null ? fmtMoney(v.latest) : '—'}</div>
             <div className="k">vs target</div>
@@ -55,6 +65,20 @@ export function NegotiationBoard({ vendors }: NegotiationBoardProps) {
               className={`v ${v.delta != null && v.delta > 0 ? 'delta-up' : v.delta != null && v.delta < 0 ? 'delta-down' : ''}`}
             >
               {fmtDelta(v.delta)}
+            </div>
+            <div className="k">vs budget</div>
+            <div
+              className={`v ${
+                v.latest != null && v.budget != null && v.latest - v.budget > 0
+                  ? 'delta-up'
+                  : v.latest != null && v.budget != null && v.latest - v.budget < 0
+                    ? 'delta-down'
+                    : ''
+              }`}
+            >
+              {v.latest != null && v.budget != null
+                ? fmtDelta(Math.round((v.latest - v.budget) * 100) / 100)
+                : '—'}
             </div>
             <div className="k">lead time</div>
             <div className="v">{v.lead}</div>
@@ -73,32 +97,49 @@ export function NegotiationBoard({ vendors }: NegotiationBoardProps) {
                   </div>
                 </div>
                 <div>
-                  <div className="what">{t.what}</div>
+                  <div className="row between" style={{ alignItems: 'baseline', gap: 8 }}>
+                    <div className="what">{t.what}</div>
+                    <button
+                      type="button"
+                      className="turn-view"
+                      onClick={() => setSelectedStep({ vendor: v, turn: t })}
+                      aria-label={`View ${t.what} details`}
+                    >
+                      [ view ]
+                    </button>
+                  </div>
                   <div className="meta">{t.meta}</div>
                 </div>
               </div>
             ))}
           </div>
-          <div
-            style={{
-              padding: '10px 14px',
-              borderTop: '1px solid var(--rule)',
-              display: 'flex',
-              gap: 6,
-            }}
-          >
-            <button className="btn tiny" onClick={() => openConvo(v)}>
-              [ open convo ]
-            </button>
-            {v.status === 'NEGOTIATING' && !v.escalated && (
-              <button className="btn tiny">[ accept ]</button>
-            )}
-            {v.escalated && (
-              <button className="btn tiny accent">[ resolve escalation ]</button>
-            )}
-          </div>
+          {v.escalated && onResolveEscalation && (
+            <div
+              style={{
+                padding: '10px 14px',
+                borderTop: '1px solid var(--rule)',
+                display: 'flex',
+                gap: 6,
+              }}
+            >
+              <button
+                className="btn tiny accent"
+                disabled={resolvingEscalation}
+                onClick={onResolveEscalation}
+              >
+                [ {resolvingEscalation ? 'resolving…' : 'resolve escalation'} ]
+              </button>
+            </div>
+          )}
         </article>
       ))}
+      {selectedStep && (
+        <StepDetailModal
+          vendor={selectedStep.vendor}
+          turn={selectedStep.turn}
+          onClose={() => setSelectedStep(null)}
+        />
+      )}
     </div>
   )
 }

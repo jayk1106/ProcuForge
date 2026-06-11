@@ -31,6 +31,14 @@ def effective_pr_status(state: dict[str, Any]) -> PrStatus:
     stored = parse_pr_status(state.get(PR_STATUS_KEY))
     if stored in {PrStatus.COMPLETED, PrStatus.CANCELLED, PrStatus.ESCALATED}:
         return stored
+    # HITL gates are authoritative — do not let ack keys infer past a parked
+    # status (e.g. AWAITING_GRN_APPROVAL sits on top of an existing po_vendor_ack).
+    if stored in {
+        PrStatus.AWAITING_PO_APPROVAL,
+        PrStatus.AWAITING_GRN_APPROVAL,
+        PrStatus.AWAITING_COMPLETION_APPROVAL,
+    }:
+        return stored
     if state.get(PROCESS_COMPLETE_VENDOR_ACK_KEY):
         return PrStatus.COMPLETED
     if state.get(INVOICE_VENDOR_ACK_KEY):
@@ -56,12 +64,17 @@ def pr_status_to_phase_label(status: PrStatus) -> PhaseLabel:
         return "NEG"
     if status in {
         PrStatus.AWAITING_USER_APPROVAL,
+        PrStatus.AWAITING_PO_APPROVAL,
         PrStatus.PO_ISSUED,
         PrStatus.PO_ACKNOWLEDGED,
         PrStatus.PO_REJECTED,
     }:
         return "PO"
-    if status in {PrStatus.AWAITING_DELIVERY, PrStatus.GOODS_RECEIVED}:
+    if status in {
+        PrStatus.AWAITING_DELIVERY,
+        PrStatus.GOODS_RECEIVED,
+        PrStatus.AWAITING_GRN_APPROVAL,
+    }:
         return "GRN"
     if status in {
         PrStatus.AWAITING_INVOICE,
@@ -71,7 +84,11 @@ def pr_status_to_phase_label(status: PrStatus) -> PhaseLabel:
         PrStatus.READY_FOR_PAYMENT,
     }:
         return "INV"
-    if status in {PrStatus.COMPLETED, PrStatus.CANCELLED}:
+    if status in {
+        PrStatus.COMPLETED,
+        PrStatus.CANCELLED,
+        PrStatus.AWAITING_COMPLETION_APPROVAL,
+    }:
         return "DONE"
     if status == PrStatus.ESCALATED:
         return "NEG"
@@ -102,6 +119,9 @@ _PR_STATUS_LABELS: dict[PrStatus, str] = {
     PrStatus.VENDOR_SELECTED: "Vendor Selected",
     PrStatus.NO_VENDOR_AVAILABLE: "No Vendor Available",
     PrStatus.AWAITING_USER_APPROVAL: "Awaiting User Approval",
+    PrStatus.AWAITING_PO_APPROVAL: "Awaiting PO Approval",
+    PrStatus.AWAITING_GRN_APPROVAL: "Awaiting GRN Approval",
+    PrStatus.AWAITING_COMPLETION_APPROVAL: "Awaiting Completion Approval",
     PrStatus.PO_ISSUED: "PO Issued",
     PrStatus.PO_ACKNOWLEDGED: "PO Acknowledged",
     PrStatus.PO_REJECTED: "PO Rejected",
@@ -135,6 +155,12 @@ def action_label(status: PrStatus) -> str | None:
         return "Resolve invoice mismatch"
     if status == PrStatus.PO_REJECTED:
         return "Review PO rejection"
+    if status == PrStatus.AWAITING_PO_APPROVAL:
+        return "Approve & send PO"
+    if status == PrStatus.AWAITING_GRN_APPROVAL:
+        return "Approve & send GRN"
+    if status == PrStatus.AWAITING_COMPLETION_APPROVAL:
+        return "Approve & close procurement"
     if needs_action(status):
         return "Action required"
     return None
@@ -184,6 +210,16 @@ def phase_status_map(status: PrStatus) -> dict[PhaseId, PhaseStatus]:
         result["rfq"] = "done"
         result["neg"] = "done"
         result["po"] = "walked"
+        return result
+
+    # Negotiation rounds are over and the workflow is moving toward PO. Mark
+    # neg as done so the timeline/section pill reflects completion instead of
+    # sitting at "in progress" until PO_ISSUED lands.
+    if status in {PrStatus.NEGOTIATION_COMPLETED, PrStatus.VENDOR_SELECTED}:
+        result = {p: "pending" for p in PHASE_ORDER}
+        result["rfq"] = "done"
+        result["neg"] = "done"
+        result["po"] = "in_progress"
         return result
 
     current = pr_status_to_phase_id(status)

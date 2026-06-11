@@ -115,13 +115,15 @@ def infer_vendor_thread_status(
         last_type = str(last_dict.get("message_type") if last_dict else "") or ""
         if last_type == "WALKAWAY":
             return VendorThreadStatus.WALKED_AWAY
-        # Once a different vendor has been picked, every other closed thread is
-        # a loss for this vendor — even if they accepted the buyer's offer.
-        if selected_vendor_id and vendor_id != selected_vendor_id:
+        # Once a vendor has been picked, every other closed thread is a loss
+        # for this vendor — even if they accepted the buyer's offer.
+        if selected_vendor_id:
             return VendorThreadStatus.REJECTED
-        if last_type == "ACCEPT":
-            return VendorThreadStatus.AWARDED
-        return VendorThreadStatus.REJECTED
+        # Rounds are done but decision_agent has not recorded a winner yet.
+        # Hold at AWAITING_VENDOR_RESPONSE so the UI does not promote any
+        # vendor to WON prematurely — the board keeps showing them as
+        # negotiating until ``selected_vendor`` lands in state.
+        return VendorThreadStatus.AWAITING_VENDOR_RESPONSE
 
     if not comms_list:
         return VendorThreadStatus.INITIATED

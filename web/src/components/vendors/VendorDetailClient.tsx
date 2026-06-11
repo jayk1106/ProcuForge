@@ -2,28 +2,18 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  escalateVendorThread,
   getVendorThread,
   getVendorThreadState,
-  walkAwayVendorThread,
 } from '@/lib/api-client'
 import type { VendorConvo, VendorThreadSummary } from '@/types'
 import { AsciiRule } from '@/components/primitives/AsciiRule'
 import { StateDebugPanel } from '@/components/primitives/StateDebugPanel'
-import { FilterChip } from '@/components/primitives/FilterChip'
 import { StatusPill } from '@/components/primitives/StatusPill'
 import { useWorkflowSocket } from '@/hooks/useWorkflowSocket'
 
 interface VendorDetailClientProps {
   rfqId: string
 }
-
-const TERMINAL_OUTCOMES = new Set([
-  'WALKED_AWAY',
-  'AWARDED',
-  'REJECTED',
-  'EXPIRED',
-])
 
 const NEGOTIATION_TYPES = new Set(['RFQ', 'QUOTE', 'COUNTER_OFFER', 'ACCEPT', 'WALKAWAY'])
 const FULFILLMENT_TYPES = new Set([
@@ -361,8 +351,6 @@ export function VendorDetailClient({ rfqId }: VendorDetailClientProps) {
   const [convo, setConvo] = useState<VendorConvo | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showRaw, setShowRaw] = useState<Record<number, boolean>>({})
-  const [acting, setActing] = useState<null | 'escalate' | 'walk-away'>(null)
-  const [actionError, setActionError] = useState<string | null>(null)
 
   // load() mutates `convo`/`error` only. Render below renders a splash only
   // while `convo` is null; once data exists, WS updates and refresh calls
@@ -393,33 +381,6 @@ export function VendorDetailClient({ rfqId }: VendorDetailClientProps) {
     setShowRaw((s) => ({ ...s, [i]: !s[i] }))
   }
 
-  async function onEscalate() {
-    setActing('escalate')
-    setActionError(null)
-    try {
-      await escalateVendorThread(rfqId)
-      // No explicit re-fetch: server broadcasts state_changed on both
-      // channels right after the override is appended.
-    } catch (e) {
-      setActionError(e instanceof Error ? e.message : 'Escalate failed')
-    } finally {
-      setActing(null)
-    }
-  }
-
-  async function onWalkAway() {
-    if (!confirm('Walk away from this vendor thread? This cannot be undone.')) return
-    setActing('walk-away')
-    setActionError(null)
-    try {
-      await walkAwayVendorThread(rfqId)
-    } catch (e) {
-      setActionError(e instanceof Error ? e.message : 'Walk-away failed')
-    } finally {
-      setActing(null)
-    }
-  }
-
   if (!convo) {
     if (error) {
       return (
@@ -448,7 +409,6 @@ export function VendorDetailClient({ rfqId }: VendorDetailClientProps) {
   }
 
   const workflowLink = convo.workflowId || convo.pr
-  const isTerminal = TERMINAL_OUTCOMES.has(convo.outcome)
 
   return (
     <div className="viewport">
@@ -457,14 +417,7 @@ export function VendorDetailClient({ rfqId }: VendorDetailClientProps) {
           Vendors
         </a>
         <span className="sep">/</span>
-        <span className="here">{convo.vendor.id}</span>
-        <span className="sep">·</span>
-        <a
-          onClick={() => router.push(`/flows/${workflowLink}`)}
-          style={{ cursor: 'pointer' }}
-        >
-          {convo.pr}
-        </a>
+        <span className="here">{rfqId}</span>
       </div>
 
       <header className="page-head">
@@ -472,75 +425,37 @@ export function VendorDetailClient({ rfqId }: VendorDetailClientProps) {
           <div>
             <div className="t-xs upper muted">Vendor conversation</div>
             <h1 className="page-title">{convo.vendor.name}</h1>
-            <div className="page-sub">
-              {convo.vendor.country} · {convo.vendor.tier} · MSSA {convo.vendor.mssa}
-              {convo.product?.name && (
-                <>
-                  {' · for '}
-                  <a
-                    className="ink"
-                    onClick={() => router.push(`/flows/${workflowLink}`)}
-                    style={{
-                      textDecoration: 'underline',
-                      textDecorationColor: 'var(--rule-strong)',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {convo.product.name}
-                  </a>
-                  {convo.product.brand ? (
-                    <span className="muted"> · {convo.product.brand}</span>
-                  ) : null}
-                  {convo.product.sku && convo.product.sku !== convo.product.name ? (
-                    <span className="muted tnum"> · {convo.product.sku}</span>
-                  ) : null}
-                </>
-              )}
-            </div>
-          </div>
-          <div className="row" style={{ gap: 6 }}>
-            <button
-              className="btn"
-              disabled={isTerminal || acting !== null}
-              onClick={onEscalate}
-            >
-              [ {acting === 'escalate' ? 'escalating…' : 'escalate'} ]
-            </button>
-            <button
-              className="btn"
-              disabled={isTerminal || acting !== null}
-              onClick={onWalkAway}
-            >
-              [ {acting === 'walk-away' ? 'walking…' : 'walk away'} ]
-            </button>
-            <button className="btn" onClick={load}>
-              [ refresh ]
-            </button>
+            {convo.product?.name && (
+              <div className="page-sub">
+                {'for '}
+                <a
+                  className="ink"
+                  onClick={() => router.push(`/flows/${workflowLink}`)}
+                  style={{
+                    textDecoration: 'underline',
+                    textDecorationColor: 'var(--rule-strong)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {convo.product.name}
+                </a>
+                {convo.product.brand ? (
+                  <span className="muted"> · {convo.product.brand}</span>
+                ) : null}
+                {convo.product.sku && convo.product.sku !== convo.product.name ? (
+                  <span className="muted tnum"> · {convo.product.sku}</span>
+                ) : null}
+              </div>
+            )}
           </div>
         </div>
-        {actionError && (
-          <div className="t-xs" style={{ marginTop: 8, color: 'var(--err, #c00)' }}>
-            {actionError}
-          </div>
-        )}
       </header>
 
       <AsciiRule />
 
       {convo.summary && <SummaryCard summary={convo.summary} />}
 
-      <div className="row" style={{ gap: 14, padding: '14px 0', flexWrap: 'wrap' }}>
-        <span className="t-xs upper muted">filter</span>
-        <FilterChip active>ALL EVENTS</FilterChip>
-        <div className="spacer" />
-        {convo.rfqId && (
-          <span className="t-xs muted">
-            rfq <span className="tnum ink">{convo.rfqId.slice(0, 8)}…</span>
-          </span>
-        )}
-      </div>
-
-      <div className="col" style={{ gap: 0 }}>
+      <div className="col" style={{ gap: 0, marginTop: 14 }}>
         {convo.messages.length === 0 ? (
           <div className="empty" style={{ marginTop: 24 }}>
             <div>No messages in this thread yet.</div>

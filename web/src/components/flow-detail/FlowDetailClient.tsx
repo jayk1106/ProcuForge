@@ -1,22 +1,21 @@
 'use client'
-import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { approveWorkflow, getWorkflowDetail, getWorkflowState } from '@/lib/api-client'
+import { approveWorkflow, getWorkflowDetail, getWorkflowState, resolveWorkflowEscalation } from '@/lib/api-client'
 import { fmtMoney } from '@/lib/format'
 import type { ActiveFlow, PhaseStatus } from '@/types'
-import { useChatContext } from '@/components/layout/ChatContext'
 import { StatusPill } from '@/components/primitives/StatusPill'
 import { Section } from '@/components/primitives/Section'
 import { Bracketed } from '@/components/primitives/Bracketed'
 import { Timeline } from './Timeline'
 import { SidebarNav } from './SidebarNav'
-import { ActivityRail } from './ActivityRail'
 import { NegotiationBoard } from './NegotiationBoard'
 import { DiscoveredVendorsBoard } from './DiscoveredVendorsBoard'
-import { PoCard, GrnCard, InvoiceCard } from './DocumentCards'
+import { PoCard, GrnCard, InvoiceCard, ApprovalBanner } from './DocumentCards'
 import { ActionBanner } from './ActionBanner'
 import { StateDebugPanel } from '@/components/primitives/StateDebugPanel'
 import { useWorkflowSocket } from '@/hooks/useWorkflowSocket'
+import { mergeVendorsById } from './mergeVendors'
 
 interface FlowDetailClientProps {
   workflowId: string
@@ -37,6 +36,19 @@ function pillForStatus(
   return { kind: 'idle', text: labels.pending }
 }
 
+const ESCALATION_SOURCE_LABELS: Record<string, string> = {
+  no_vendors_discovered: 'no vendors in catalog',
+  vendors_all_filtered: 'all vendors filtered out',
+  no_vendor_available: 'no vendor available',
+  negotiator_stall: 'negotiation stalled',
+  po_rejected: 'PO rejected by vendor',
+  invoice_correction_pending: 'invoice correction pending',
+}
+
+function escalationSourceLabel(source: string): string {
+  return ESCALATION_SOURCE_LABELS[source] ?? source.replace(/_/g, ' ')
+}
+
 function selectedVendorName(flow: ActiveFlow): string | null {
   const winner = flow.vendors.find((v) => v.status === 'WON')
   if (winner) return winner.name
@@ -49,11 +61,25 @@ function selectedVendorName(flow: ActiveFlow): string | null {
 
 export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
   const router = useRouter()
-  const { openChat } = useChatContext()
   const [flow, setFlow] = useState<ActiveFlow | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [approving, setApproving] = useState(false)
-  const [activeSec, setActiveSec] = useState('neg')
+  const [resolvingEscalation, setResolvingEscalation] = useState(false)
+  const [activeSec, setActiveSec] = useState('spec')
+  const viewportRef = useRef<HTMLDivElement>(null)
+  const headRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const head = headRef.current
+    const viewport = viewportRef.current
+    if (!head || !viewport) return
+    const ro = new ResizeObserver(() => {
+      // 56px topnav offset + measured head height + a small gap
+      viewport.style.setProperty('--flow-head-bottom', `${56 + head.offsetHeight + 12}px`)
+    })
+    ro.observe(head)
+    return () => ro.disconnect()
+  }, [flow])
 
   // load() only mutates `flow`/`error`; no loading flag. The render below
   // shows a splash only while `flow` is null, so WS-driven updates and
@@ -74,11 +100,27 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
 
   useWorkflowSocket<ActiveFlow>(`/ws/workflow/${workflowId}`, {
     onState: (next) => {
-      setFlow(next)
+      // Only vendors get merge-by-id protection — parallel negotiator tools
+      // can broadcast snapshots that omit a sibling vendor mid-flight. All
+      // other fields are replaced wholesale.
+      setFlow((prev) =>
+        prev ? { ...next, vendors: mergeVendorsById(prev.vendors, next.vendors) } : next,
+      )
       setError(null)
     },
     debugLabel: 'flow',
   })
+
+  async function handleResolveEscalation() {
+    setResolvingEscalation(true)
+    try {
+      await resolveWorkflowEscalation(workflowId)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Resolve escalation failed')
+    } finally {
+      setResolvingEscalation(false)
+    }
+  }
 
   async function handleApprove() {
     setApproving(true)
@@ -115,6 +157,54 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
     [flow?.phaseStatus]
   )
 
+  // Track which workflow milestones the user has already seen, so we only
+  // scroll on the *transition* into a new milestone (vendors discovered,
+  // negotiation started, vendor awarded, PO/GRN/invoice arrived, completion).
+  // The first render after the flow loads snapshots whatever milestones are
+  // already true and does *not* scroll — that way reopening an in-progress
+  // workflow leaves the user at the top, but live WS-driven progress
+  // smooth-scrolls them to the section that just gained content.
+  const milestonesRef = useRef<Set<string> | null>(null)
+  useEffect(() => {
+    if (!flow) return
+    const winner = flow.vendors.find((v) => v.status === 'WON')
+    const milestones: Record<string, boolean> = {
+      discovered: (flow.discoveredVendors?.length ?? 0) > 0,
+      neg: flow.vendors.length > 0,
+      award: !!winner,
+      po: !!flow.po,
+      grn: !!flow.grn,
+      inv: !!flow.invoice,
+      done: phaseStatus.done === 'done',
+    }
+
+    if (milestonesRef.current === null) {
+      milestonesRef.current = new Set(
+        Object.entries(milestones)
+          .filter(([, v]) => v)
+          .map(([k]) => k)
+      )
+      return
+    }
+
+    const order = ['discovered', 'neg', 'award', 'po', 'grn', 'inv', 'done']
+    let target: string | null = null
+    for (const m of order) {
+      if (milestones[m] && !milestonesRef.current.has(m)) {
+        milestonesRef.current.add(m)
+        target = m
+      }
+    }
+    if (!target) return
+
+    const id = target
+    setActiveSec(id)
+    requestAnimationFrame(() => {
+      const el = document.getElementById(`sec-${id}`)
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }, [flow, phaseStatus])
+
   if (!flow) {
     if (error) {
       return (
@@ -142,8 +232,32 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
     )
   }
 
-  const isEmpty = flow.vendors.length === 0 && flow.currentPhase === 'rfq'
-  const showAction = flow.needsAction
+  const isEmpty =
+    flow.vendors.length === 0 &&
+    (flow.discoveredVendors?.length ?? 0) === 0 &&
+    flow.specDone === false &&
+    flow.currentPhase === 'rfq'
+  const pending = flow.pendingApproval ?? null
+  // The HITL gates render per-section CTAs, so suppress the global ActionBanner
+  // when one is active — otherwise the user sees two approve buttons.
+  const showAction = flow.needsAction && !pending
+  const escalation = flow.escalationContext ?? null
+  const showEscalationBanner = Boolean(escalation)
+  const canResolveEscalation =
+    flow.prStatus === 'ESCALATED' && escalation?.tier === 'full'
+
+  const approvalCta = (
+    step: 'po' | 'grn' | 'completion',
+    label: string,
+  ) =>
+    pending?.step === step
+      ? {
+          reason: pending.reason,
+          buttonLabel: label,
+          onApprove: handleApprove,
+          busy: approving,
+        }
+      : undefined
 
   const vendorCount = flow.vendors.length
   const discoveredCount = flow.discoveredVendors?.length ?? 0
@@ -160,36 +274,48 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
     return { kind: 'go', text: `in progress · ${vendorCount} vendors` }
   })()
 
-  const poPill = pillForStatus(phaseStatus.po, {
-    done: 'fulfilled',
-    inProgress: 'issued',
-    pending: 'pending',
-    walked: 'rejected',
-  })
-  const grnPill = pillForStatus(phaseStatus.grn, {
-    done: 'received',
-    inProgress: 'in transit',
-    pending: 'pending',
-  })
+  const actionRequiredPill: PhasePillSpec = { kind: 'warn', text: 'action required' }
+  const poPill: PhasePillSpec = (() => {
+    if (pending?.step === 'po') return actionRequiredPill
+    if (phaseStatus.po === 'done') return { kind: 'ok', text: 'fulfilled' }
+    if (phaseStatus.po === 'walked') return { kind: 'err', text: 'rejected' }
+    if (phaseStatus.po === 'in_progress') {
+      return flow.po
+        ? { kind: 'go', text: 'issued' }
+        : { kind: 'go', text: 'drafting' }
+    }
+    return { kind: 'idle', text: 'pending' }
+  })()
+  const grnPill: PhasePillSpec =
+    pending?.step === 'grn'
+      ? actionRequiredPill
+      : pillForStatus(phaseStatus.grn, {
+          done: 'sent',
+          inProgress: 'in transit',
+          pending: 'pending',
+        })
   const invPill = pillForStatus(phaseStatus.inv, {
     done: 'matched',
     inProgress: 'verifying',
     pending: 'pending',
   })
-  const donePill = pillForStatus(phaseStatus.done, {
-    done: 'complete',
-    inProgress: 'finalizing',
-    pending: 'pending',
-  })
+  const donePill: PhasePillSpec =
+    pending?.step === 'completion'
+      ? actionRequiredPill
+      : pillForStatus(phaseStatus.done, {
+          done: 'complete',
+          inProgress: 'finalizing',
+          pending: 'pending',
+        })
 
   const grn = flow.grn as Record<string, unknown> | null | undefined
   const invoice = flow.invoice as Record<string, unknown> | null | undefined
 
   return (
-    <div className="viewport">
+    <div className="viewport flow-detail-viewport" ref={viewportRef}>
       <div className="crumbs">
         <a onClick={() => router.push('/flows')} style={{ cursor: 'pointer' }}>
-          Flows
+          Requests
         </a>
         <span className="sep">/</span>
         <span className="here">{flow.requestId ?? flow.id.slice(0, 8)}</span>
@@ -207,17 +333,12 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
               {flow.title}
             </h1>
             <div className="page-sub">
-              opened {flow.opened} · requester{' '}
-              <span className="ink">{flow.requester}</span> · cost center {flow.costCenter} · need
-              by {flow.needBy}
+              opened {flow.opened} · need by {flow.needBy}
             </div>
           </div>
           <div className="row" style={{ gap: 6 }}>
             <button className="btn" onClick={load}>
               [ refresh ]
-            </button>
-            <button className="btn" onClick={openChat}>
-              [ ask about this PR ]
             </button>
           </div>
         </div>
@@ -231,14 +352,51 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
         />
       )}
 
-      <Timeline
-        phase={isEmpty ? 'rfq' : flow.currentPhase}
-        durations={flow.phaseDurations}
-        phaseStatus={phaseStatus}
-        empty={isEmpty}
-      />
+      {showEscalationBanner && escalation && (
+        <div
+          className="action-banner"
+          style={{
+            marginTop: 12,
+            padding: '12px 16px',
+            border: '1px solid var(--warn, #c9a227)',
+            background: 'var(--surface-2, rgba(201, 162, 39, 0.08))',
+          }}
+        >
+          <div className="row between" style={{ alignItems: 'flex-start', gap: 12 }}>
+            <div>
+              <div className="t-sm upper muted">
+                Escalation · {escalationSourceLabel(escalation.source)}
+              </div>
+              <div style={{ marginTop: 4 }}>{escalation.reason}</div>
+              {escalation.recommendedAction && (
+                <div className="t-xs muted" style={{ marginTop: 6 }}>
+                  {escalation.recommendedAction}
+                </div>
+              )}
+            </div>
+            {canResolveEscalation && (
+              <button
+                className="btn accent"
+                disabled={resolvingEscalation}
+                onClick={handleResolveEscalation}
+              >
+                [ {resolvingEscalation ? 'resolving…' : 'resolve escalation'} ]
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
-      <div className="flow-layout" style={{ marginTop: 20 }}>
+      <div className="flow-timeline-sticky" ref={headRef}>
+        <Timeline
+          phase={isEmpty ? 'rfq' : flow.currentPhase}
+          durations={flow.phaseDurations}
+          phaseStatus={phaseStatus}
+          empty={isEmpty}
+        />
+      </div>
+
+      <div className="flow-layout no-rail" style={{ marginTop: 20 }}>
         <SidebarNav
           active={activeSec}
           onPick={handlePickSection}
@@ -247,15 +405,12 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
         />
 
         <main>
-          {isEmpty ? (
-            <EmptyFlowBody />
-          ) : (
-            <>
-              <div id="sec-spec">
+          <div id="sec-spec">
                 <Section
+                  key={`spec-${flow.specDone !== false ? 'done' : 'validating'}`}
                   title="Specification & approval"
                   num="1.0"
-                  defaultOpen={false}
+                  defaultOpen
                   status={
                     flow.specDone !== false ? (
                       <StatusPill kind="ok">spec validated</StatusPill>
@@ -277,9 +432,10 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
 
               <div id="sec-discovered">
                 <Section
+                  key={`discovered-${discoveredCount}-${vendorCount > 0 ? 'shortlisted' : 'pending'}`}
                   title="Vendors discovered"
                   num="2.0"
-                  defaultOpen={discoveredCount > 0 && vendorCount === 0}
+                  defaultOpen={discoveredCount > 0}
                   pending={discoveredCount === 0 && phaseStatus.rfq === 'pending'}
                   status={(() => {
                     if (discoveredCount === 0 && phaseStatus.rfq === 'walked') {
@@ -310,14 +466,15 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
                   num="3.0"
                   defaultOpen
                   status={<StatusPill kind={negPill.kind}>{negPill.text}</StatusPill>}
-                  right={
-                    flow.target > 0 ? (
-                      <span className="t-xs muted">target {fmtMoney(flow.target)}</span>
-                    ) : undefined
-                  }
                 >
                   {flow.vendors.length > 0 ? (
-                    <NegotiationBoard vendors={flow.vendors} />
+                    <NegotiationBoard
+                      vendors={flow.vendors}
+                      onResolveEscalation={
+                        canResolveEscalation ? handleResolveEscalation : undefined
+                      }
+                      resolvingEscalation={resolvingEscalation}
+                    />
                   ) : (
                     <PendingPlaceholder label="Vendor search and negotiation in progress." />
                   )}
@@ -326,6 +483,7 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
 
               <div id="sec-award">
                 <SelectedVendorSection
+                  key={flow.vendors.find((v) => v.status === 'WON') ? 'award-won' : 'award-pending'}
                   flow={flow}
                   negPhase={phaseStatus.neg}
                 />
@@ -333,30 +491,64 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
 
               <div id="sec-po">
                 <Section
+                  key={
+                    pending?.step === 'po'
+                      ? 'po-gated'
+                      : flow.po
+                        ? 'po-issued'
+                        : 'po-pending'
+                  }
                   title="Purchase order"
                   num="4.0"
-                  pending={!flow.po}
-                  defaultOpen={!!flow.po && phaseStatus.po === 'in_progress'}
+                  pending={!flow.po && pending?.step !== 'po'}
+                  defaultOpen={
+                    pending?.step === 'po' ||
+                    !!flow.po ||
+                    phaseStatus.po === 'in_progress'
+                  }
                   status={<StatusPill kind={poPill.kind}>{poPill.text}</StatusPill>}
                 >
-                  {flow.po ? (
-                    <PoCard po={flow.po as Record<string, unknown>} />
+                  {flow.po || pending?.step === 'po' ? (
+                    <PoCard
+                      po={(flow.po as Record<string, unknown> | null) ?? null}
+                      approval={approvalCta('po', 'approve & send PO →')}
+                    />
                   ) : (
-                    <PendingPlaceholder label="PO will be issued after approval." />
+                    <PendingPlaceholder
+                      label={
+                        phaseStatus.po === 'in_progress'
+                          ? 'Drafting purchase order from negotiated terms.'
+                          : 'PO will be issued after approval.'
+                      }
+                    />
                   )}
                 </Section>
               </div>
 
               <div id="sec-grn">
                 <Section
+                  key={
+                    pending?.step === 'grn'
+                      ? 'grn-gated'
+                      : grn
+                        ? 'grn-received'
+                        : 'grn-pending'
+                  }
                   title="Goods receipt"
                   num="5.0"
-                  pending={!grn}
-                  defaultOpen={!!grn && phaseStatus.grn === 'in_progress'}
+                  pending={!grn && pending?.step !== 'grn'}
+                  defaultOpen={
+                    pending?.step === 'grn' ||
+                    !!grn ||
+                    phaseStatus.grn === 'in_progress'
+                  }
                   status={<StatusPill kind={grnPill.kind}>{grnPill.text}</StatusPill>}
                 >
-                  {grn ? (
-                    <GrnCard grn={grn as Record<string, unknown>} />
+                  {grn || pending?.step === 'grn' ? (
+                    <GrnCard
+                      grn={(grn as Record<string, unknown> | null) ?? null}
+                      approval={approvalCta('grn', 'approve & send GRN →')}
+                    />
                   ) : (
                     <PendingPlaceholder label="Awaiting goods receipt from vendor." />
                   )}
@@ -365,10 +557,11 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
 
               <div id="sec-inv">
                 <Section
+                  key={invoice ? 'inv-present' : 'inv-pending'}
                   title="Invoice match"
                   num="6.0"
                   pending={!invoice}
-                  defaultOpen={!!invoice && phaseStatus.inv === 'in_progress'}
+                  defaultOpen={!!invoice || phaseStatus.inv === 'in_progress'}
                   status={<StatusPill kind={invPill.kind}>{invPill.text}</StatusPill>}
                 >
                   {invoice ? (
@@ -381,12 +574,31 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
 
               <div id="sec-done">
                 <Section
+                  key={
+                    pending?.step === 'completion'
+                      ? 'done-gated'
+                      : phaseStatus.done === 'done'
+                        ? 'done-complete'
+                        : 'done-pending'
+                  }
                   title="Completion"
                   num="7.0"
-                  pending={phaseStatus.done !== 'done'}
-                  defaultOpen={phaseStatus.done === 'done'}
+                  pending={phaseStatus.done !== 'done' && pending?.step !== 'completion'}
+                  defaultOpen={
+                    phaseStatus.done === 'done' || pending?.step === 'completion'
+                  }
                   status={<StatusPill kind={donePill.kind}>{donePill.text}</StatusPill>}
                 >
+                  {pending?.step === 'completion' && (
+                    <ApprovalBanner
+                      approval={{
+                        reason: pending.reason,
+                        buttonLabel: 'approve & close procurement →',
+                        onApprove: handleApprove,
+                        busy: approving,
+                      }}
+                    />
+                  )}
                   {phaseStatus.done === 'done' ? (
                     <div className="kv">
                       <div className="k">PO</div>
@@ -410,16 +622,12 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
                         )}
                       </div>
                     </div>
-                  ) : (
+                  ) : pending?.step === 'completion' ? null : (
                     <PendingPlaceholder label="Workflow will close after payment is authorized." />
                   )}
                 </Section>
               </div>
-            </>
-          )}
         </main>
-
-        <ActivityRail items={flow.activity} />
       </div>
 
       <StateDebugPanel
@@ -531,22 +739,6 @@ function PendingPlaceholder({ label }: { label: string }) {
     <div className="row" style={{ gap: 12, color: 'var(--muted)', fontSize: 'var(--t-sm)' }}>
       <Bracketed>pending</Bracketed>
       <span>{label}</span>
-    </div>
-  )
-}
-
-function EmptyFlowBody() {
-  return (
-    <div>
-      <div className="empty" style={{ padding: '40px 28px', marginTop: 0 }}>
-        <pre className="ascii-mark">──── agents starting ────</pre>
-        <div className="muted t-sm">
-          The buyer agent is processing this request. Vendor search and RFQ broadcast will follow.
-        </div>
-        <div style={{ marginTop: 18 }} className="thinking">
-          analyzing spec against catalog
-        </div>
-      </div>
     </div>
   )
 }

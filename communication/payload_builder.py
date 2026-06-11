@@ -63,6 +63,7 @@ class A2AMessageBuilder:
     currency: str
     from_agent: str = BUYER_AGENT
     to_agent: str = VENDOR_AGENT
+    buyer_org_id: str = ""
 
     # ── private ──────────────────────────────────────────────────────────────
 
@@ -81,7 +82,7 @@ class A2AMessageBuilder:
         payload: dict[str, Any],
     ) -> dict[str, Any]:
         now = _utc_now()
-        return {
+        envelope: dict[str, Any] = {
             "message_id": str(uuid4()),
             "rfq_id": self.rfq_id,
             "vendor_id": self.vendor_id,
@@ -92,6 +93,9 @@ class A2AMessageBuilder:
             "timestamp": now.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
             "payload": payload,
         }
+        if self.buyer_org_id:
+            envelope["buyer_org_id"] = self.buyer_org_id
+        return envelope
 
     @staticmethod
     def _deadline_defaults() -> tuple[str, str]:

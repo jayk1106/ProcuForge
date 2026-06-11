@@ -8,6 +8,7 @@ from google.adk.tools.base_tool import ToolContext
 
 from ...pr_status import PrStatus
 from ...pr_status_transitions import transition_after_decision
+from ...escalation import maybe_notify_only
 from ...state_keys import PR_STATUS_KEY, SELECTED_VENDOR_KEY
 
 _LOG = logging.getLogger(__name__)
@@ -49,22 +50,28 @@ async def select_vendor(
         "final_price": round(float(final_price), 2),
         "outcome": outcome,
     }
-    tool_context.state[SELECTED_VENDOR_KEY] = decision
 
     if outcome == "WALKED_AWAY":
-        # All vendors walked away — set terminal status directly instead of
-        # transitioning to VENDOR_SELECTED (which would trigger a broken purchase flow).
+        # All vendors walked away — set terminal status directly. We deliberately
+        # do NOT write selected_vendor: there is no winner, so leaving it unset
+        # keeps the UI honest and prevents downstream consumers (purchase_manager,
+        # ui_mappers) from rendering a "selected" vendor that never agreed.
         tool_context.state[PR_STATUS_KEY] = PrStatus.NO_VENDOR_AVAILABLE.value
+        maybe_notify_only(
+            tool_context.state,
+            source="no_vendor_available",
+            reason="All vendors walked away or rejected terms — no vendor selected",
+        )
         _LOG.info(
             "decision_agent: no_vendor_available all_walked_away reference_vendor=%s",
             vendor_id,
         )
         return {
             "ok": True,
-            "selected_vendor": decision,
-            "note": "no vendor accepted; pr_status set to NO_VENDOR_AVAILABLE",
+            "note": "no vendor accepted; pr_status set to NO_VENDOR_AVAILABLE; selected_vendor left unset",
         }
 
+    tool_context.state[SELECTED_VENDOR_KEY] = decision
     transition_after_decision(tool_context.state)
 
     _LOG.info(

@@ -2,7 +2,6 @@
 
 PRODUCT_KEY = "product"
 REQUEST_KEY = "request"
-PLANNER_PLAN_KEY = "current_plan"
 VENDOR_OFFERS_KEY = "vendor_offers"
 PR_STATUS_KEY = "pr_status"
 PREVIOUS_PR_STATUS_KEY = "previous_pr_status"
@@ -26,8 +25,23 @@ PO_VENDOR_ACK_KEY = "po_vendor_ack"
 INVOICE_VENDOR_ACK_KEY = "invoice_vendor_ack"
 PROCESS_COMPLETE_VENDOR_ACK_KEY = "process_complete_vendor_ack"
 
+# Human-in-the-loop approval policy (set at workflow start).
+# When True, purchase_manager pauses before each of PO / GRN / PROCESS_COMPLETE
+# until the matching step appears in APPROVED_STEPS_KEY.
+APPROVAL_REQUIRED_KEY = "approval_required"
+# Steps the human has signed off on. Values: "po" | "grn" | "completion".
+APPROVED_STEPS_KEY = "approved_steps"
+# Block describing the gate the workflow is currently parked at.
+# Shape: { "step": "po"|"grn"|"completion", "reason": str, "requested_at": iso8601 }
+PENDING_APPROVAL_KEY = "pending_approval"
+
 # Losing vendors notified with RFQ_CLOSED (vendor_id -> True); idempotent send guard
 RFQ_CLOSED_LOSERS_KEY = "rfq_closed_losers"
+# Losing vendors that accepted the buyer's offer but were not selected — sent a
+# WALKAWAY first so the vendor side closes their thread as BUYER_WALKED_AWAY.
+# Shape: { vendor_id: True }. Tracked separately from RFQ_CLOSED_LOSERS_KEY so a
+# mid-retry can resume Phase 2 (RFQ_CLOSED) without re-sending the WALKAWAY.
+WALKAWAY_LOSERS_KEY = "walkaway_losers"
 
 # Purchase stall detection: snapshot at start of each purchase_manager turn
 PURCHASE_STEP_SNAPSHOT_KEY = "purchase_step_snapshot"
@@ -39,3 +53,13 @@ NEGOTIATOR_COMMS_SNAPSHOT_KEY = "negotiator_comms_snapshot"
 # Count of consecutive negotiator turns that produced no new communications.
 # Resets to 0 on any turn that makes progress. Used for the stall-guard force-close.
 NEGOTIATOR_STALL_STREAK_KEY = "negotiator_stall_streak"
+
+# Escalation tracking (UI reads ESCALATION_CONTEXT_KEY via ui_mappers to render the
+# escalation banner). ESCALATION_PENDING_NOTIFY_KEY flags an active escalation that
+# has not yet been resolved by /workflow/{id}/resolve-escalation; the UI may surface
+# this as a "needs review" indicator. No outbound notifications are sent.
+ESCALATION_CONTEXT_KEY = "escalation_context"
+ESCALATION_PENDING_NOTIFY_KEY = "escalation_pending_notify"
+INVOICE_CORRECTION_ROUNDS_KEY = "invoice_correction_rounds"
+PO_REJECTION_COUNT_KEY = "po_rejection_count"
+LOOP_ITERATION_KEY = "loop_iteration"

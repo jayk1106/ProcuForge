@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from communication.schema import MessageType
 from procu_forge_buyer.pr_status import PrStatus
 from procu_forge_buyer.state_keys import (
+    ESCALATION_CONTEXT_KEY,
+    ESCALATION_PENDING_NOTIFY_KEY,
     GRN_KEY,
     INVOICE_KEY,
     INVOICE_VENDOR_ACK_KEY,
@@ -21,6 +23,7 @@ from procu_forge_buyer.state_keys import (
     PURCHASE_STEP_SNAPSHOT_KEY,
     RFQ_CLOSED_LOSERS_KEY,
     SELECTED_VENDOR_KEY,
+    WALKAWAY_LOSERS_KEY,
 )
 from procu_forge_buyer.subagents.purchase_manager.callbacks import (
     purchase_manager_after_agent,
@@ -453,6 +456,8 @@ def test_stall_guard_escalates_outside_purchase_phase():
 
     assert state[PR_STATUS_KEY] == PrStatus.ESCALATED.value
     assert state[PURCHASE_STALL_STREAK_KEY] == 2
+    assert state[ESCALATION_PENDING_NOTIFY_KEY] is True
+    assert state[ESCALATION_CONTEXT_KEY]["source"] == "purchase_stall"
 
 
 def test_stall_guard_does_not_escalate_during_po_issued():
@@ -639,3 +644,184 @@ def test_instruction_provider_drives_full_flow():
     # Behaviour-affecting copy: imperative chain language.
     assert "MUST" in rendered
     assert "single turn" in rendered or "same turn" in rendered
+
+
+def _accepted_loser_config(rfq_id: str) -> dict:
+    """Negotiation_config entry whose last buyer message was ACCEPT."""
+    accept_envelope = {
+        "from_agent": "buyer_agent",
+        "to_agent": "vendor_agent",
+        "message_type": "ACCEPT",
+        "round": 2,
+        "payload": {"unit_price": 30.88, "total_price": 30.88, "currency": "USD"},
+    }
+    vendor_accept_reply = {
+        "from_agent": "vendor_agent",
+        "to_agent": "buyer_agent",
+        "message_type": "ACCEPT",
+        "round": 2,
+        "payload": {"unit_price": 30.88, "total_price": 30.88, "currency": "USD"},
+    }
+    return {
+        "rfq_id": rfq_id,
+        "round": 2,
+        "done": True,
+        "product": {"id": "prod-1", "sku": "PI-OFF-0001", "quantity": 1, "currency": "USD"},
+        "communications": [accept_envelope, vendor_accept_reply],
+    }
+
+
+async def test_send_po_walks_away_from_accepted_but_not_selected_vendor():
+    """An ACCEPTED loser must receive WALKAWAY before RFQ_CLOSED."""
+    state = _base_state()
+    state[SELECTED_VENDOR_KEY] = {"vendor": _WINNER_ID, "final_price": 30.88, "outcome": "ACCEPTED"}
+    state[NEGOTIATION_CONFIG_KEY][_WINNER_ID] = {
+        "rfq_id": "rfq-winner",
+        "product": {"id": "prod-1", "sku": "PI-OFF-0001", "quantity": 1, "currency": "USD"},
+        "communications": [],
+    }
+    # Make the original loser an ACCEPTED-but-not-selected vendor.
+    state[NEGOTIATION_CONFIG_KEY][_VENDOR_ID] = _accepted_loser_config(_RFQ_ID)
+    ctx = _tool_context(state)
+
+    captured: list[dict] = []
+
+    async def _side_effect(payload, rfq_id):
+        env = json.loads(payload)
+        captured.append(env)
+        mt = env["message_type"]
+        if mt == "WALKAWAY":
+            return json.dumps(
+                {
+                    "message_type": "WALKAWAY",
+                    "from_agent": "vendor_agent",
+                    "to_agent": "buyer_agent",
+                    "payload": {"reason": "BUYER_WALKAWAY_ACKNOWLEDGED"},
+                }
+            )
+        if mt == "RFQ_CLOSED":
+            return json.dumps({"ok": True, "message": "RFQ_CLOSED acknowledged"})
+        if mt == "PO":
+            return _po_ack_reply(env["payload"]["po_number"])
+        return json.dumps({"ok": False, "error": "unexpected"})
+
+    with patch(
+        "procu_forge_buyer.subagents.purchase_manager.tools.call_vendor",
+        new_callable=AsyncMock,
+        side_effect=_side_effect,
+    ):
+        result = await send_po(ctx)
+
+    assert result["ok"] is True
+    msg_sequence = [e["message_type"] for e in captured]
+    # The accepted loser must see WALKAWAY *before* RFQ_CLOSED.
+    walkaway_idx = msg_sequence.index("WALKAWAY")
+    rfq_closed_idx = msg_sequence.index("RFQ_CLOSED")
+    assert walkaway_idx < rfq_closed_idx
+    assert state[WALKAWAY_LOSERS_KEY][_VENDOR_ID] is True
+    assert state[RFQ_CLOSED_LOSERS_KEY][_VENDOR_ID] is True
+
+    # WALKAWAY envelope + vendor reply land in the loser's communications so
+    # the projection layer reports WALKED_AWAY (not REJECTED).
+    loser_comms = state[NEGOTIATION_CONFIG_KEY][_VENDOR_ID]["communications"]
+    assert loser_comms[-1]["message_type"] == "WALKAWAY"
+    assert state[NEGOTIATION_CONFIG_KEY][_VENDOR_ID]["done"] is True
+
+
+async def test_send_po_skips_walkaway_when_already_sent():
+    """Phase 1 idempotency: a vendor already in walkaway_losers should not get a second WALKAWAY."""
+    state = _base_state()
+    state[SELECTED_VENDOR_KEY] = {"vendor": _WINNER_ID, "final_price": 30.88, "outcome": "ACCEPTED"}
+    state[NEGOTIATION_CONFIG_KEY][_WINNER_ID] = {
+        "rfq_id": "rfq-winner",
+        "product": {"id": "prod-1", "sku": "PI-OFF-0001", "quantity": 1, "currency": "USD"},
+        "communications": [],
+    }
+    state[NEGOTIATION_CONFIG_KEY][_VENDOR_ID] = _accepted_loser_config(_RFQ_ID)
+    # Prior turn already sent WALKAWAY but crashed before RFQ_CLOSED landed.
+    state[WALKAWAY_LOSERS_KEY] = {_VENDOR_ID: True}
+    ctx = _tool_context(state)
+
+    captured: list[dict] = []
+
+    async def _side_effect(payload, rfq_id):
+        env = json.loads(payload)
+        captured.append(env)
+        mt = env["message_type"]
+        if mt == "RFQ_CLOSED":
+            return json.dumps({"ok": True})
+        if mt == "PO":
+            return _po_ack_reply(env["payload"]["po_number"])
+        return json.dumps({"ok": False, "error": f"unexpected message_type {mt}"})
+
+    with patch(
+        "procu_forge_buyer.subagents.purchase_manager.tools.call_vendor",
+        new_callable=AsyncMock,
+        side_effect=_side_effect,
+    ):
+        result = await send_po(ctx)
+
+    assert result["ok"] is True
+    msg_sequence = [e["message_type"] for e in captured]
+    assert "WALKAWAY" not in msg_sequence
+    assert "RFQ_CLOSED" in msg_sequence
+    assert state[RFQ_CLOSED_LOSERS_KEY][_VENDOR_ID] is True
+
+
+async def test_send_po_walked_away_loser_skips_walkaway_phase():
+    """A loser whose negotiation ended in buyer WALKAWAY should NOT receive a second WALKAWAY."""
+    state = _base_state()
+    state[SELECTED_VENDOR_KEY] = {"vendor": _WINNER_ID, "final_price": 30.88, "outcome": "ACCEPTED"}
+    state[NEGOTIATION_CONFIG_KEY][_WINNER_ID] = {
+        "rfq_id": "rfq-winner",
+        "product": {"id": "prod-1", "sku": "PI-OFF-0001", "quantity": 1, "currency": "USD"},
+        "communications": [],
+    }
+    state[NEGOTIATION_CONFIG_KEY][_VENDOR_ID] = {
+        "rfq_id": _RFQ_ID,
+        "round": 3,
+        "done": True,
+        "product": {"id": "prod-1", "sku": "PI-OFF-0001", "quantity": 1, "currency": "USD"},
+        "communications": [
+            {
+                "from_agent": "buyer_agent",
+                "to_agent": "vendor_agent",
+                "message_type": "WALKAWAY",
+                "round": 3,
+                "payload": {"reason": "PRICE_TOO_HIGH"},
+            },
+            {
+                "from_agent": "vendor_agent",
+                "to_agent": "buyer_agent",
+                "message_type": "WALKAWAY",
+                "round": 3,
+                "payload": {"reason": "BUYER_WALKAWAY_ACKNOWLEDGED"},
+            },
+        ],
+    }
+    ctx = _tool_context(state)
+
+    captured: list[dict] = []
+
+    async def _side_effect(payload, rfq_id):
+        env = json.loads(payload)
+        captured.append(env)
+        mt = env["message_type"]
+        if mt == "RFQ_CLOSED":
+            return json.dumps({"ok": True})
+        if mt == "PO":
+            return _po_ack_reply(env["payload"]["po_number"])
+        return json.dumps({"ok": False, "error": f"unexpected message_type {mt}"})
+
+    with patch(
+        "procu_forge_buyer.subagents.purchase_manager.tools.call_vendor",
+        new_callable=AsyncMock,
+        side_effect=_side_effect,
+    ):
+        result = await send_po(ctx)
+
+    assert result["ok"] is True
+    msg_sequence = [e["message_type"] for e in captured]
+    assert "WALKAWAY" not in msg_sequence
+    assert state[RFQ_CLOSED_LOSERS_KEY][_VENDOR_ID] is True
+    assert state.get(WALKAWAY_LOSERS_KEY, {}).get(_VENDOR_ID) is not True

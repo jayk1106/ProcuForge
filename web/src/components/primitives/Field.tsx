@@ -1,7 +1,7 @@
 import React from 'react'
 
 interface FieldProps {
-  label: string
+  label: React.ReactNode
   required?: boolean
   optional?: boolean
   hint?: string

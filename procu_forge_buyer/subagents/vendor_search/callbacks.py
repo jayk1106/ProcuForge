@@ -10,7 +10,6 @@ from google.adk.agents.callback_context import CallbackContext
 from google.genai import types
 
 from ...callbacks import (
-    _plan_summary,
     _product_id,
     _request_id,
     managed_log_after_handler,
@@ -18,7 +17,7 @@ from ...callbacks import (
 )
 from ...pr_status import PrStatus
 from ...pr_status_transitions import pr_status_line
-from ...state_keys import PLANNER_PLAN_KEY, PR_STATUS_KEY, VENDOR_OFFERS_KEY
+from ...state_keys import PR_STATUS_KEY, VENDOR_OFFERS_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -72,10 +71,29 @@ def _offers_detail_block(st: dict[str, Any]) -> str:
         lead = o.get("leadTimeDays", o.get("lead_time_days"))
         availability = o.get("availabilityStatus", o.get("availability_status"))
         contracted = o.get("contracted")
-        tail = " contracted" if contracted else ""
+        moq = o.get("minimumOrderQty", o.get("minimum_order_qty"))
+        currency_ok = o.get("currencyMatchesRequest", o.get("currency_matches_request"))
+        relation = o.get("vendorRelation") or o.get("vendor_relation") or {}
+        preferred = relation.get("preferredVendor", relation.get("preferred_vendor")) if isinstance(relation, dict) else None
+        strength = relation.get("relationshipStrength", relation.get("relationship_strength")) if isinstance(relation, dict) else None
+        risk = relation.get("riskLevel", relation.get("risk_level")) if isinstance(relation, dict) else None
         per = f" per {sell_unit}" if sell_unit else ""
+        flags: list[str] = []
+        if contracted:
+            flags.append("contracted")
+        if preferred:
+            flags.append("preferred")
+        if currency_ok is False:
+            flags.append("currency_mismatch")
+        flag_tail = (" " + " ".join(flags)) if flags else ""
+        rel_bits: list[str] = []
+        if strength is not None:
+            rel_bits.append(f"strength={strength}")
+        if risk:
+            rel_bits.append(f"risk={risk}")
+        rel_tail = (" " + " ".join(rel_bits)) if rel_bits else ""
         lines.append(
-            f"- vendorId={vendor_id} price={unit_price} {currency}{per} lead={lead} availability={availability}{tail}"
+            f"- vendorId={vendor_id} price={unit_price} {currency}{per} lead={lead} moq={moq} availability={availability}{flag_tail}{rel_tail}"
         )
     if len(offers) > 10:
         lines.append(f"... ({len(offers) - 10} more)")
@@ -84,12 +102,11 @@ def _offers_detail_block(st: dict[str, Any]) -> str:
 
 def _vendor_before(ctx: CallbackContext, st: dict[str, Any]) -> str:
     return (
-        "vendor_search_agent start session_id=%s request_id=%s product_id=%s plan=%s offer_count=%s %s"
+        "vendor_search_agent start session_id=%s request_id=%s product_id=%s offer_count=%s %s"
         % (
             ctx.session.id,
             _request_id(st) or "",
             _product_id(st) or "",
-            _plan_summary(st.get(PLANNER_PLAN_KEY)),
             _offers_count_teaser(st),
             pr_status_line(st),
         )
@@ -98,12 +115,11 @@ def _vendor_before(ctx: CallbackContext, st: dict[str, Any]) -> str:
 
 def _vendor_after(ctx: CallbackContext, st: dict[str, Any]) -> str:
     return (
-        "vendor_search_agent end session_id=%s request_id=%s product_id=%s plan=%s offer_count=%s %s"
+        "vendor_search_agent end session_id=%s request_id=%s product_id=%s offer_count=%s %s"
         % (
             ctx.session.id,
             _request_id(st) or "",
             _product_id(st) or "",
-            _plan_summary(st.get(PLANNER_PLAN_KEY)),
             _offers_count_teaser(st),
             pr_status_line(st),
         )

@@ -30,3 +30,7 @@ uv sync
 ```
 
 Configure Vertex / credentials via `.env` (see existing variables in the repo).
+
+## Deployment
+
+End-to-end deploy guide (Agent Engine + Cloud Run + Vercel), covering first-time setup and every subsequent redeploy: **[docs/deployment_guide.md](docs/deployment_guide.md)**.
