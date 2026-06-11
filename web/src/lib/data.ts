@@ -316,13 +316,6 @@ export const VENDOR_CONVO: VendorConvo = {
   ],
 }
 
-export const SUGGESTED: string[] = [
-  "Why is V-0421 holding price?",
-  "Show me what's blocking",
-  "What's the negotiation strategy?",
-  "Summarize this PR",
-]
-
 export const VENDORS: Vendor[] = [
   { id: 'V-0218', name: 'Heinrich Tooling GmbH',       country: 'DE', tier: 'Tier-2', pr: 'PR-2026-0418', last: '14:32',     state: 'NEGOTIATING',     unread: 0, msgs: 12 },
   { id: 'V-0421', name: 'Apex Servo Industrial',        country: 'US', tier: 'Tier-2', pr: 'PR-2026-0418', last: '13:55',     state: 'ESCALATED',       unread: 2, msgs: 9  },

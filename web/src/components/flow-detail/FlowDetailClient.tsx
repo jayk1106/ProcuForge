@@ -4,7 +4,6 @@ import { useRouter } from 'next/navigation'
 import { approveWorkflow, getWorkflowDetail, getWorkflowState, resolveWorkflowEscalation } from '@/lib/api-client'
 import { fmtMoney } from '@/lib/format'
 import type { ActiveFlow, PhaseStatus } from '@/types'
-import { useChatContext } from '@/components/layout/ChatContext'
 import { StatusPill } from '@/components/primitives/StatusPill'
 import { Section } from '@/components/primitives/Section'
 import { Bracketed } from '@/components/primitives/Bracketed'
@@ -62,7 +61,6 @@ function selectedVendorName(flow: ActiveFlow): string | null {
 
 export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
   const router = useRouter()
-  const { openChat } = useChatContext()
   const [flow, setFlow] = useState<ActiveFlow | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [approving, setApproving] = useState(false)
@@ -341,9 +339,6 @@ export function FlowDetailClient({ workflowId }: FlowDetailClientProps) {
           <div className="row" style={{ gap: 6 }}>
             <button className="btn" onClick={load}>
               [ refresh ]
-            </button>
-            <button className="btn" onClick={() => openChat(workflowId)}>
-              [ ask about this PR ]
             </button>
           </div>
         </div>
