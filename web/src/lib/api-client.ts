@@ -8,7 +8,9 @@ import type {
   WsTicketResponse,
 } from '@/types/auth'
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
+// HTTP requests go to the same origin and are rewritten to the API by
+// Next.js (see next.config.ts). This keeps the session cookie first-party.
+const API_URL = ''
 
 export class UnauthorizedError extends Error {
   constructor(message = 'unauthenticated') {
